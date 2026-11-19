@@ -10,11 +10,13 @@ import pysubs2
 
 console = Console()
 
-# Fallback models in priority order (flash-lite has best uptime and zero 503 spikes)
+# Verified active working Gemini models for high-speed subtitle translation
 CANDIDATE_MODELS = [
     "gemini-flash-lite-latest",
-    "gemini-3.8-flash",
-    "gemini-flash-latest"
+    "gemini-3.1-flash-lite",
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview"
 ]
 
 HINGLISH_PROMPT = """You are an expert subtitle translator. Translate the following video subtitles into natural, modern, conversational Hinglish (Hindi written using the Roman/English alphabet, exactly how people speak and text in India).

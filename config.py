@@ -47,7 +47,6 @@ else:
         GEMINI_API_KEYS = [single_key.strip()]
     else:
         GEMINI_API_KEYS = DEFAULT_GEMINI_KEYS.copy()
-        # Auto-create local .env if missing so user can view/edit it
         env_path = BASE_DIR / ".env"
         if not env_path.exists():
             try:
@@ -63,10 +62,10 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 TEMP_DIR = Path(os.getenv("TEMP_DIR", BASE_DIR / "temp"))
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-def get_anime_burn_dir() -> Path:
+def get_anime_burn_base_dir() -> Path:
     """
     Detects device download directory (Termux / Android, Windows, Mac, Linux)
-    and returns 'Download/Anime Burn' directory path.
+    and returns 'Download/Anime Burn' base directory.
     """
     # 1. Android Termux paths
     candidates = [
@@ -86,12 +85,21 @@ def get_anime_burn_dir() -> Path:
         std_download.mkdir(parents=True, exist_ok=True)
         return std_download
     except Exception:
-        # Fallback to local project folder if home is restricted
         local_dir = BASE_DIR / "Anime Burn"
         local_dir.mkdir(parents=True, exist_ok=True)
         return local_dir
 
-OUTPUT_DIR = get_anime_burn_dir()
+BASE_ANIME_BURN_DIR = get_anime_burn_base_dir()
+
+# Separate Subtitle and Video folders
+SUBTITLE_OUTPUT_DIR = BASE_ANIME_BURN_DIR / "Subtitle"
+VIDEO_OUTPUT_DIR = BASE_ANIME_BURN_DIR / "Video"
+
+SUBTITLE_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+VIDEO_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# For backward compatibility
+OUTPUT_DIR = VIDEO_OUTPUT_DIR
 
 # Quality presets
 QUALITY_MAP = {

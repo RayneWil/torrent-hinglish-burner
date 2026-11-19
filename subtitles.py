@@ -13,13 +13,14 @@ console = Console()
 
 SUBTITLE_EXTENSIONS = {".ass", ".srt", ".vtt", ".sub"}
 
-# Style presets for SD (384x288, 640x360) and HD (1280x720)
+# Style presets for SD (384x288, 640x360)
 STYLES_SD = [
     "Style: Info,Roboto Medium,26,&H00FFFFFF,&H000000FF,&H00000000,&H24000000,0,0,0,0,100,100,0,0,1,1.0,0.8,2,20,20,20,1",
     "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,0.5,9,30,14,6,1"
 ]
 
-STYLES_720P = [
+# Style presets for HD & Full HD (1280x720, 1920x1080)
+STYLES_HD = [
     "Style: Info,HelveticaRounded LT Std BdCn,54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0.8,0,1,2,2,2,30,30,40,1",
     "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,1.0,9,30,14,6,1"
 ]
@@ -153,9 +154,10 @@ def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSA
 def inject_watermark_into_file(file_path: Path):
     """
     Post-processes the .ass file according to resolution:
-    - 384x288:  Style SD, \\fs13\\pos(380,5)
-    - 640x360:  Style SD, \\fs16\\pos(630,5)
-    - 1280x720: Style 720P, \\fs32\\pos(1260,10)
+    - 384x288:   Style SD, \\fs13\\pos(380,5)
+    - 640x360:   Style SD, \\fs16\\pos(630,5)
+    - 1280x720:  Style HD, \\fs32\\pos(1260,10)
+    - 1920x1080: Style HD, \\fs42\\pos(1900,10)
     """
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -166,7 +168,7 @@ def inject_watermark_into_file(file_path: Path):
         rx = int(rx_match.group(1)) if rx_match else None
         ry = int(ry_match.group(1)) if ry_match else None
 
-        # Check resolution case
+        # Check resolution profile
         if rx == 384 and ry == 288:
             target_rx, target_ry = 384, 288
             pos_x, pos_y, fs = 380, 5, 13
@@ -178,14 +180,22 @@ def inject_watermark_into_file(file_path: Path):
         elif rx == 1280 and ry == 720:
             target_rx, target_ry = 1280, 720
             pos_x, pos_y, fs = 1260, 10, 32
-            target_styles = STYLES_720P
+            target_styles = STYLES_HD
+        elif rx == 1920 and ry == 1080:
+            target_rx, target_ry = 1920, 1080
+            pos_x, pos_y, fs = 1900, 10, 42
+            target_styles = STYLES_HD
         else:
-            # Fallback by resolution size / aspect ratio
+            # Fallback based on scale / aspect ratio
             if rx and ry:
-                if rx >= 1280 or ry >= 720:
+                if rx >= 1920 or ry >= 1080:
+                    target_rx, target_ry = 1920, 1080
+                    pos_x, pos_y, fs = 1900, 10, 42
+                    target_styles = STYLES_HD
+                elif rx >= 1280 or ry >= 720:
                     target_rx, target_ry = 1280, 720
                     pos_x, pos_y, fs = 1260, 10, 32
-                    target_styles = STYLES_720P
+                    target_styles = STYLES_HD
                 elif abs(rx/ry - 4/3) < 0.1:
                     target_rx, target_ry = 384, 288
                     pos_x, pos_y, fs = 380, 5, 13
@@ -197,7 +207,7 @@ def inject_watermark_into_file(file_path: Path):
             else:
                 target_rx, target_ry = 1280, 720
                 pos_x, pos_y, fs = 1260, 10, 32
-                target_styles = STYLES_720P
+                target_styles = STYLES_HD
 
         # Update or set PlayResX & PlayResY
         if "PlayResX:" in content:

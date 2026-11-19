@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
+import config
 from config import QUALITY_MAP
 
 console = Console()

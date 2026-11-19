@@ -2,6 +2,7 @@
 """
 Torrent to Hinglish Burner CLI
 Automated pipeline to download torrents, translate subtitles to Hinglish (.ass), and burn them into 480p/720p video.
+Supports multi-key pool rotation (30 lines/request, auto-shift after 20 requests or quota limits).
 """
 
 import argparse
@@ -24,6 +25,7 @@ BANNER = """
 [bold cyan]╔═══════════════════════════════════════════════════════╗
 ║         🔥 TORRENT TO HINGLISH BURNER CLI 🔥          ║
 ║      Magnet ➔ Hinglish (.ASS) ➔ 480p/720p Hardcode     ║
+║        [Multi-API Key Pool & Auto-Rotation Active]    ║
 ╚═══════════════════════════════════════════════════════╝[/bold cyan]
 """
 
@@ -48,10 +50,10 @@ def parse_args():
         help="Target output video quality (480p or 720p). Default: 720p"
     )
     parser.add_argument(
-        "-k", "--api-key",
+        "-k", "--api-keys",
         type=str,
-        default=config.GEMINI_API_KEY,
-        help="Google Gemini API Key for Hinglish translation (or set in .env)"
+        default=None,
+        help="Comma-separated Gemini API Keys for rotation (e.g. 'key1,key2,key3')"
     )
     parser.add_argument(
         "-o", "--output-dir",
@@ -76,13 +78,18 @@ def main():
     print_banner()
     args = parse_args()
 
-    api_key = args.api_key or config.GEMINI_API_KEY
-    if not api_key:
+    # Determine API keys list
+    if args.api_keys:
+        api_keys = [k.strip() for k in args.api_keys.split(",") if k.strip()]
+    else:
+        api_keys = config.GEMINI_API_KEYS
+
+    if not api_keys:
         console.print(Panel(
-            "[bold red]❌ Missing GEMINI_API_KEY![/bold red]\n\n"
-            "To translate subtitles into conversational Hinglish, please provide a Gemini API Key.\n"
-            "1. Get a free key at: [link=https://aistudio.google.com/]https://aistudio.google.com/[/link]\n"
-            "2. Add to [cyan].env[/cyan] file or pass via [cyan]--api-key 'YOUR_KEY'[/cyan]",
+            "[bold red]❌ Missing GEMINI_API_KEYS![/bold red]\n\n"
+            "To translate subtitles into conversational Hinglish, please provide Gemini API Key(s).\n"
+            "1. Add keys in [cyan].env[/cyan] as: [green]GEMINI_API_KEYS=key1,key2,key3,key4,key5[/green]\n"
+            "2. Or pass via CLI: [cyan]--api-keys 'key1,key2,key3'[/cyan]",
             title="Authentication Error",
             border_style="red"
         ))
@@ -108,9 +115,14 @@ def main():
         font_size = config.QUALITY_MAP[args.quality]["fontsize"]
         subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
 
-        # Step 4: Translate to Hinglish
-        console.rule("[bold yellow]Step 4: AI Hinglish Translation[/bold yellow]")
-        hinglish_subs = translate_subtitles_to_hinglish(subs, api_key=api_key)
+        # Step 4: Translate to Hinglish (30 lines/request, auto-shift after 20 requests)
+        console.rule("[bold yellow]Step 4: AI Hinglish Translation (Multi-Key Rotation)[/bold yellow]")
+        hinglish_subs = translate_subtitles_to_hinglish(
+            subs,
+            api_keys=api_keys,
+            batch_size=30,
+            max_requests_per_key=20
+        )
         final_ass_path = temp_dir / f"{video_file.stem}_hinglish.ass"
         save_ass_subtitles(hinglish_subs, final_ass_path)
 

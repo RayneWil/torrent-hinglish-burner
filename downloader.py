@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 from rich.console import Console
+from rich.markup import escape
 
 console = Console()
 
@@ -20,20 +21,25 @@ def download_torrent(source: str, download_dir: Path) -> Path:
     """
     if not check_aria2c():
         console.print("[bold red]❌ Error: aria2c is not installed or not in PATH![/bold red]")
-        console.print("Please install aria2c (`sudo apt install aria2` or `choco install aria2`).")
+        console.print("Please install aria2c (`pkg install aria2` or `apt install aria2`).")
         sys.exit(1)
 
     download_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"[bold cyan]📥 Starting Torrent Download via aria2c...[/bold cyan]")
 
-    # Build aria2c command
+    # Build aria2c command optimized for Mobile / Termux & Linux
     cmd = [
         "aria2c",
         "--seed-time=0",
         "--max-connection-per-server=16",
         "--split=16",
         "--min-split-size=1M",
-        "--summary-interval=5",
+        "--summary-interval=2",
+        "--file-allocation=none",     # Critical for Android / Termux storage stability
+        "--enable-dht=true",
+        "--bt-enable-lpd=true",
+        "--follow-torrent=mem",
+        "--console-log-level=warn",
         "--dir", str(download_dir.resolve()),
         "--bt-stop-timeout=600",
         source
@@ -49,13 +55,15 @@ def download_torrent(source: str, download_dir: Path) -> Path:
             universal_newlines=True
         )
 
-        # Print output lines to terminal
+        # Print output lines cleanly without markup injection errors
         for line in process.stdout:
             clean_line = line.strip()
+            if not clean_line:
+                continue
             if any(k in clean_line for k in ["[#", "ETA:", "Download Speed:", "Download Progress", "SEED"]):
-                console.print(f"[dim]{clean_line}[/dim]")
+                console.print(f"[dim]{escape(clean_line)}[/dim]")
             elif "Download complete:" in clean_line or "errorCode=" in clean_line:
-                console.print(f"[bold yellow]{clean_line}[/bold yellow]")
+                console.print(f"[bold yellow]{escape(clean_line)}[/bold yellow]")
 
         process.wait()
 
@@ -64,7 +72,8 @@ def download_torrent(source: str, download_dir: Path) -> Path:
             sys.exit(1)
 
     except Exception as e:
-        console.print(f"[bold red]❌ Exception during download: {e}[/bold red]")
+        console.print("[bold red]❌ Exception during download:[/bold red]")
+        console.print(str(e), markup=False)
         sys.exit(1)
 
     # Find the downloaded video file

@@ -2,6 +2,7 @@
 """
 DSA Subber Ready - Interactive Terminal UI
 Full terminal interface for Termux, Linux VPS, Colab, and PC.
+Saves Subtitles in Download/Anime Burn/Subtitle and Videos in Download/Anime Burn/Video.
 """
 
 import os
@@ -96,7 +97,8 @@ def start_burning_workflow(quality: str):
     show_header()
     console.print(Panel(
         f"[bold green]🚀 Start Burning Process | Target Quality: {quality}[/bold green]\n"
-        f"Output Destination: [cyan]{config.OUTPUT_DIR}[/cyan]",
+        f"📁 Subtitle Output: [cyan]{config.SUBTITLE_OUTPUT_DIR}[/cyan]\n"
+        f"🎬 Video Output:    [cyan]{config.VIDEO_OUTPUT_DIR}[/cyan]",
         border_style="green"
     ))
 
@@ -146,32 +148,35 @@ def start_burning_workflow(quality: str):
             batch_size=30,
             max_requests_per_key=20
         )
-        final_ass_path = temp_dir / f"{video_file.stem}_hinglish.ass"
-        save_ass_subtitles(hinglish_subs, final_ass_path)
+        
+        # Save translated subtitle into Download/Anime Burn/Subtitle/
+        final_sub_destination = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
+        save_ass_subtitles(hinglish_subs, final_sub_destination)
+        console.print(f"[bold green]💾 Subtitle saved to: {final_sub_destination}[/bold green]")
 
         # Step 5: Encoding & Burning
         console.rule(f"[bold cyan]Step 5: Burning Subtitles & Encoding ({quality})[/bold cyan]")
         temp_encoded_video = temp_dir / f"{video_file.stem}_Hinglish_{quality}.mp4"
         burn_subtitles_and_encode(
             video_path=video_file,
-            ass_path=final_ass_path,
+            ass_path=final_sub_destination,
             output_path=temp_encoded_video,
             quality=quality
         )
 
-        # Step 6: Move to Download/Anime Burn folder
-        final_destination = config.OUTPUT_DIR / f"{video_file.stem}_Hinglish_{quality}.mp4"
-        shutil.move(str(temp_encoded_video), str(final_destination))
+        # Step 6: Move burned video to Download/Anime Burn/Video/
+        final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{quality}.mp4"
+        shutil.move(str(temp_encoded_video), str(final_video_destination))
 
         # Completion Success Banner
         show_header()
         console.print(Panel(
-            f"[bold green]🎉 SUBTITLES BURNED & MOVED SUCCESSFULLY! 🎉[/bold green]\n\n"
-            f"[bold white]File Name:[/bold white] {final_destination.name}\n"
-            f"[bold white]Quality:[/bold white] {quality}\n"
-            f"[bold white]Location:[/bold white] [bold cyan]{final_destination}[/bold cyan]\n"
-            f"[bold white]File Size:[/bold white] {final_destination.stat().st_size / (1024*1024):.1f} MB\n\n"
-            f"[dim]Saved inside 'Anime Burn' in your Downloads folder![/dim]",
+            f"[bold green]🎉 PROCESSING COMPLETED SUCCESSFULLY! 🎉[/bold green]\n\n"
+            f"[bold white]🎬 Burned Video:[/bold white] [bold cyan]{final_video_destination}[/bold cyan] "
+            f"({final_video_destination.stat().st_size / (1024*1024):.1f} MB)\n"
+            f"[bold white]📝 Hinglish Subtitle:[/bold white] [bold cyan]{final_sub_destination}[/bold cyan]\n"
+            f"[bold white]Quality:[/bold white] {quality}\n\n"
+            f"[dim]Saved in: Download/Anime Burn/Video & Download/Anime Burn/Subtitle[/dim]",
             title="[bold green]Done[/bold green]",
             border_style="green"
         ))
@@ -199,7 +204,9 @@ def main_menu():
             "[bold green][1][/bold green] 🔥 [bold]Start Burning[/bold]\n"
             "[bold yellow][2][/bold yellow] 🔑 [bold]Change API Key[/bold]\n"
             f"[bold cyan][3][/bold cyan] ⚙️ [bold]Change Quality[/bold] (Current: [cyan]{quality}[/cyan])\n"
-            f"[bold blue][4][/bold blue] 📂 [bold]Open Anime Burn Folder[/bold] ([dim]{config.OUTPUT_DIR}[/dim])\n"
+            f"[bold blue][4][/bold blue] 📂 [bold]View Anime Burn Folders[/bold]\n"
+            "       ├── [dim]Video:    " + str(config.VIDEO_OUTPUT_DIR) + "[/dim]\n"
+            "       └── [dim]Subtitle: " + str(config.SUBTITLE_OUTPUT_DIR) + "[/dim]\n"
             "[bold red][5][/bold red] 🚪 [bold]Exit[/bold]",
             title="[bold cyan]Main Menu[/bold cyan]",
             border_style="cyan"
@@ -218,8 +225,9 @@ def main_menu():
         elif choice == "3":
             quality = select_quality_menu(quality)
         elif choice == "4":
-            console.print(f"\n[bold cyan]Output Folder: {config.OUTPUT_DIR}[/bold cyan]")
-            time.sleep(2)
+            console.print(f"\n[bold cyan]🎬 Video Folder:    {config.VIDEO_OUTPUT_DIR}[/bold cyan]")
+            console.print(f"[bold cyan]📝 Subtitle Folder: {config.SUBTITLE_OUTPUT_DIR}[/bold cyan]\n")
+            time.sleep(3)
         elif choice == "5":
             console.print("\n[bold yellow]👋 Exiting DSA Subber. Bye bhai![/bold yellow]\n")
             sys.exit(0)

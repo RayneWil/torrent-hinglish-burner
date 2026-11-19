@@ -111,7 +111,8 @@ def burn_subtitles_and_encode(
             sys.exit(1)
 
     except Exception as e:
-        console.print(f"[bold red]❌ Encoding error: {e}[/bold red]")
+        console.print("[bold red]❌ Encoding error:[/bold red]")
+        console.print(str(e), markup=False)
         sys.exit(1)
 
     file_size_mb = output_path.stat().st_size / (1024 * 1024)

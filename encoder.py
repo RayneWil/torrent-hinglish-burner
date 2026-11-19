@@ -53,8 +53,12 @@ def burn_subtitles_and_encode(
     audio_bitrate = q_config["audio_bitrate"]
 
     escaped_ass = escape_ffmpeg_filter_path(ass_path)
-    # Combine ass burn-in and downscaling
-    vf_filter = f"ass='{escaped_ass}',scale=-2:{height}"
+    fonts_dir = config.BASE_DIR / "fonts"
+    if fonts_dir.exists():
+        escaped_fonts = escape_ffmpeg_filter_path(fonts_dir)
+        vf_filter = f"ass='{escaped_ass}':fontsdir='{escaped_fonts}',scale=-2:{height}"
+    else:
+        vf_filter = f"ass='{escaped_ass}',scale=-2:{height}"
 
     total_duration = get_video_duration(video_path)
 

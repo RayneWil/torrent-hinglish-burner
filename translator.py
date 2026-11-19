@@ -10,11 +10,18 @@ import pysubs2
 
 console = Console()
 
+# Fallback models in priority order (flash-lite has best uptime and zero 503 spikes)
+CANDIDATE_MODELS = [
+    "gemini-flash-lite-latest",
+    "gemini-3.8-flash",
+    "gemini-flash-latest"
+]
+
 HINGLISH_PROMPT = """You are an expert subtitle translator. Translate the following video subtitles into natural, modern, conversational Hinglish (Hindi written using the Roman/English alphabet, exactly how people speak and text in India).
 
 CRITICAL GUIDELINES:
 1. SCRIPT: NEVER use Devanagari script (क, ख, ग). Strictly use the Roman English alphabet (e.g., "Bhai tu kahan ja raha hai?", "Mujhe ye bilkul pasand nahi aaya").
-2. TONE: Keep it natural, conversational, and context-appropriate (like modern Indian OTT web series or movies).
+2. TONE: Keep it natural, conversational, and context-appropriate (like modern Indian OTT web series or anime dubs).
 3. PRESERVATION: Keep proper nouns, character names, places, technical jargon, and international terms in English.
 4. FORMAT: You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
 
@@ -35,7 +42,8 @@ Output:
 class GeminiKeyManager:
     """
     Manages pool of multiple Gemini API keys.
-    Rotates automatically after max_requests_per_key (20) or on quota errors (429/ResourceExhausted).
+    Rotates ONLY when quota (429/403) is exhausted or after max_requests_per_key (20).
+    Never burns keys on temporary 503/server spikes.
     """
     def __init__(self, keys: List[str], max_requests_per_key: int = 20):
         self.keys = [k.strip() for k in keys if k.strip()]
@@ -86,8 +94,8 @@ def clean_sub_text(text: str) -> str:
     text = text.replace("\\N", " ").replace("\\n", " ")
     return text.strip()
 
-def call_gemini_rest(prompt_text: str, api_key: str, model_name: str = "gemini-3.8-flash") -> str:
-    """Direct REST call using standard library urllib (zero external pip packages)."""
+def call_gemini_rest(prompt_text: str, api_key: str, model_name: str) -> str:
+    """Direct REST call using standard library urllib."""
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
     payload = {
         "contents": [
@@ -107,7 +115,7 @@ def call_gemini_rest(prompt_text: str, api_key: str, model_name: str = "gemini-3
         data=data_bytes,
         headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.urlopen(req, timeout=25) as response:
         res_json = json.loads(response.read().decode("utf-8"))
         candidates = res_json.get("candidates", [])
         if candidates:
@@ -119,65 +127,58 @@ def call_gemini_rest(prompt_text: str, api_key: str, model_name: str = "gemini-3
 def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager) -> List[Dict]:
     """
     Translates a 30-line batch using direct REST API.
-    Auto-rotates to next key on quota limit (429) or after 20 requests.
+    - Model fallback chain: tries flash-lite first, falls back if 503 high demand occurs.
+    - Rotates API keys ONLY on true quota exhaustion (429/403) or after 20 successful requests.
     """
+    input_json = json.dumps(batch, ensure_ascii=False)
+    full_prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
+
     while key_manager.has_keys:
         active_key = key_manager.get_active_key()
-        input_json = json.dumps(batch, ensure_ascii=False)
-        full_prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
 
-        try:
-            raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
-
-            # Clean markdown codeblocks if returned
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
-                raw_text = re.sub(r"\n```$", "", raw_text)
-
-            translated_batch = json.loads(raw_text)
-            key_manager.record_success()
-            return translated_batch
-
-        except urllib.error.HTTPError as e:
-            err_code = e.code
-            err_msg = e.read().decode("utf-8", errors="ignore")
-            # Rate limit / Quota exceeded
-            if err_code in (429, 403) or "quota" in err_msg.lower() or "resourceexhausted" in err_msg.lower():
-                console.print(f"[bold yellow]⚠️ Quota limit hit on Key #{key_manager.current_idx + 1} (HTTP {err_code})[/bold yellow]")
-                key_manager.rotate(reason=f"HTTP {err_code} Quota Limit")
-                time.sleep(1)
-                continue
-            else:
-                console.print(f"[bold yellow]⚠️ HTTP error {err_code}: {err_msg[:120]}. Retrying in 2s...[/bold yellow]")
-                time.sleep(2)
-                try:
-                    raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
-                    if raw_text.startswith("```"):
-                        raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
-                        raw_text = re.sub(r"\n```$", "", raw_text)
-                    translated_batch = json.loads(raw_text)
-                    key_manager.record_success()
-                    return translated_batch
-                except Exception as retry_err:
-                    console.print(f"[bold red]❌ Retry failed: {retry_err}. Switching key...[/bold red]")
-                    key_manager.rotate(reason="Retry failed")
-
-        except Exception as e:
-            console.print(f"[bold yellow]⚠️ Translation error: {e}. Retrying...[/bold yellow]")
-            time.sleep(2)
+        # Try candidate models on the current active key
+        for model in CANDIDATE_MODELS:
             try:
-                raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
+                raw_text = call_gemini_rest(full_prompt, active_key, model_name=model).strip()
+
                 if raw_text.startswith("```"):
                     raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
                     raw_text = re.sub(r"\n```$", "", raw_text)
+
                 translated_batch = json.loads(raw_text)
                 key_manager.record_success()
                 return translated_batch
-            except Exception as retry_err:
-                console.print(f"[bold red]❌ Batch retry failed: {retry_err}. Moving to next key...[/bold red]")
-                key_manager.rotate(reason="Exception retry failed")
 
-    console.print("[bold red]❌ No active Gemini API key remaining. Keeping original lines for this batch.[/bold red]")
+            except urllib.error.HTTPError as e:
+                err_code = e.code
+                err_body = e.read().decode("utf-8", errors="ignore")
+
+                # If Quota limit (429 / 403), rotate to NEXT KEY immediately
+                if err_code in (429, 403) or "quota" in err_body.lower() or "resourceexhausted" in err_body.lower():
+                    console.print(f"[bold yellow]⚠️ Quota limit on Key #{key_manager.current_idx + 1} (HTTP {err_code}). Shifting key...[/bold yellow]")
+                    key_manager.rotate(reason=f"HTTP {err_code} Quota Limit")
+                    break  # Break out to try new key with first model
+
+                # If 503 (Server high demand) or 404, DO NOT burn key! Try next candidate model
+                elif err_code in (503, 500, 404):
+                    console.print(f"[dim]⚠️ Model '{model}' busy (HTTP {err_code}). Trying alternate model...[/dim]")
+                    time.sleep(1)
+                    continue
+
+                else:
+                    console.print(f"[dim]⚠️ Error on model '{model}': HTTP {err_code}. Trying alternate...[/dim]")
+                    time.sleep(1)
+                    continue
+
+            except Exception as e:
+                console.print(f"[dim]⚠️ Network error on '{model}': {e}. Trying alternate...[/dim]")
+                time.sleep(1)
+                continue
+
+        # If all candidate models had temporary network issues on this key, pause briefly before retrying
+        time.sleep(2)
+
+    console.print("[bold red]❌ All Gemini API keys exhausted. Preserving original lines for remaining dialogues.[/bold red]")
     return batch
 
 def translate_subtitles_to_hinglish(
@@ -224,8 +225,8 @@ def translate_subtitles_to_hinglish(
         translated_results = translate_batch_with_retry(batch, key_manager)
         for item in translated_results:
             translations_map[item["id"]] = item["text"]
-        # Small delay between requests
-        time.sleep(0.3)
+        # Small delay between requests to be gentle on rate limits
+        time.sleep(0.4)
 
     # Apply translated texts back to SSAFile
     for idx, event in enumerate(subs.events):

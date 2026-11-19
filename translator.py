@@ -234,6 +234,9 @@ def translate_subtitles_to_hinglish(
     for idx, event in enumerate(subs.events):
         if event.is_comment:
             continue
+        # Skip watermark lines so AI doesn't modify them
+        if getattr(event, "style", "") == "WatermarkTop" or "DarkSoulAcademy" in event.text:
+            continue
         cleaned = clean_sub_text(event.text)
         if cleaned:
             dialogues_to_translate.append({"id": idx, "text": cleaned})

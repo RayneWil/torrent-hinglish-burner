@@ -6,6 +6,15 @@ Full terminal interface for Termux, Linux VPS, Colab, and PC.
 
 import os
 import sys
+
+# Reconnect stdin to /dev/tty if launched via a pipe (like curl | bash)
+if not sys.stdin.isatty():
+    try:
+        if os.path.exists("/dev/tty"):
+            sys.stdin = open("/dev/tty", "r")
+    except Exception:
+        pass
+
 import shutil
 import time
 from pathlib import Path
@@ -13,7 +22,6 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 
 import config
 from downloader import download_torrent
@@ -42,9 +50,12 @@ def change_api_keys_menu():
     current_count = len(config.GEMINI_API_KEYS)
     console.print(f"Current active Gemini API Keys: [bold green]{current_count}[/bold green]\n")
 
-    new_keys_input = Prompt.ask(
-        "[cyan]Enter Gemini API Keys (comma-separated, e.g. key1,key2,key3) or press Enter to cancel[/cyan]"
-    ).strip()
+    try:
+        new_keys_input = Prompt.ask(
+            "[cyan]Enter Gemini API Keys (comma-separated, e.g. key1,key2,key3) or press Enter to cancel[/cyan]"
+        ).strip()
+    except (EOFError, KeyboardInterrupt):
+        return
 
     if new_keys_input:
         keys_list = [k.strip() for k in new_keys_input.split(",") if k.strip()]
@@ -71,11 +82,14 @@ def select_quality_menu(current_quality: str) -> str:
     console.print("[2] 480p (Standard Definition - Fast & Low File Size)")
     console.print("[3] Keep Current")
 
-    choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3"], default="3")
-    if choice == "1":
-        return "720p"
-    elif choice == "2":
-        return "480p"
+    try:
+        choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3"], default="3")
+        if choice == "1":
+            return "720p"
+        elif choice == "2":
+            return "480p"
+    except (EOFError, KeyboardInterrupt):
+        pass
     return current_quality
 
 def start_burning_workflow(quality: str):
@@ -90,10 +104,17 @@ def start_burning_workflow(quality: str):
     if not config.GEMINI_API_KEYS:
         console.print("[bold red]❌ No Gemini API keys found![/bold red]")
         console.print("Please select 'Change API Key' from the main menu first.")
-        Prompt.ask("\nPress Enter to return to menu")
+        try:
+            Prompt.ask("\nPress Enter to return to menu")
+        except (EOFError, KeyboardInterrupt):
+            pass
         return
 
-    torrent_input = Prompt.ask("\n[bold yellow]👉 Torrent link ya Magnet URI do[/bold yellow]").strip()
+    try:
+        torrent_input = Prompt.ask("\n[bold yellow]👉 Torrent link ya Magnet URI do[/bold yellow]").strip()
+    except (EOFError, KeyboardInterrupt):
+        return
+
     if not torrent_input:
         console.print("[red]Link empty hai. Process cancelled.[/red]")
         time.sleep(1.5)
@@ -162,7 +183,10 @@ def start_burning_workflow(quality: str):
         if temp_dir.exists():
             shutil.rmtree(temp_dir, ignore_errors=True)
 
-    Prompt.ask("\n[bold yellow]Press Enter to return to main menu...[/bold yellow]")
+    try:
+        Prompt.ask("\n[bold yellow]Press Enter to return to main menu...[/bold yellow]")
+    except (EOFError, KeyboardInterrupt):
+        pass
 
 def main_menu():
     quality = "720p"
@@ -180,7 +204,11 @@ def main_menu():
             border_style="cyan"
         ))
 
-        choice = Prompt.ask("[bold cyan]Enter choice (1-5)[/bold cyan]", choices=["1", "2", "3", "4", "5"], default="1")
+        try:
+            choice = Prompt.ask("[bold cyan]Enter choice (1-5)[/bold cyan]", choices=["1", "2", "3", "4", "5"], default="1")
+        except (EOFError, KeyboardInterrupt):
+            console.print("\n\n[bold yellow]Exiting... Bye![/bold yellow]")
+            sys.exit(0)
 
         if choice == "1":
             start_burning_workflow(quality)

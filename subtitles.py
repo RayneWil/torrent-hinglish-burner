@@ -17,9 +17,7 @@ def check_ffmpeg() -> bool:
     return shutil.which("ffmpeg") is not None and shutil.which("ffprobe") is not None
 
 def probe_subtitles(video_path: Path) -> List[Dict]:
-    """
-    Inspects video file for embedded subtitle streams using ffprobe.
-    """
+    """Inspects video file for embedded subtitle streams using ffprobe."""
     if not check_ffmpeg():
         console.print("[bold red]❌ ffmpeg/ffprobe not found! Please install ffmpeg.[/bold red]")
         sys.exit(1)
@@ -53,14 +51,12 @@ def extract_subtitle(video_path: Path, output_sub_path: Path, track_index: Optio
     if streams:
         selected_index = None
         if track_index is not None:
-            # Check if requested index is valid
             for s in streams:
                 if s["index"] == track_index:
                     selected_index = track_index
                     break
 
         if selected_index is None:
-            # Prefer English or first available stream
             for s in streams:
                 tags = s.get("tags", {})
                 lang = tags.get("language", "").lower()
@@ -72,7 +68,6 @@ def extract_subtitle(video_path: Path, output_sub_path: Path, track_index: Optio
 
         console.print(f"[cyan]🎬 Extracting embedded subtitle track (stream index: {selected_index})...[/cyan]")
         
-        # Determine output format based on extension (.ass or .srt)
         cmd = [
             "ffmpeg",
             "-y",
@@ -93,42 +88,50 @@ def extract_subtitle(video_path: Path, output_sub_path: Path, track_index: Optio
         if candidates:
             chosen = candidates[0]
             console.print(f"[bold green]✅ Found external subtitle file: {chosen.name}[/bold green]")
-            # Copy to output path
             shutil.copy(chosen, output_sub_path)
             return output_sub_path
 
     console.print("[bold red]❌ No embedded or external subtitles found for this video![/bold red]")
     sys.exit(1)
 
+def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: int = 22):
+    """
+    Applies 'HelveticaRounded LT Std BdCn' to EVERY style in the .ass subtitle file.
+    """
+    target_font = ASS_STYLE_DEFAULTS.get("fontname", "HelveticaRounded LT Std BdCn")
+
+    # If no styles, create Default
+    if not subs.styles:
+        default_style = pysubs2.SSAStyle()
+        default_style.fontname = target_font
+        default_style.fontsize = font_size or ASS_STYLE_DEFAULTS["fontsize"]
+        default_style.primarycolor = pysubs2.Color(255, 255, 255)
+        default_style.outlinecolor = pysubs2.Color(0, 0, 0)
+        default_style.bold = True
+        default_style.outline = 2.5
+        default_style.shadow = 1.0
+        subs.styles["Default"] = default_style
+
+    # Apply target font to all styles
+    for style_name, style in subs.styles.items():
+        style.fontname = target_font
+        if font_size:
+            style.fontsize = font_size
+        style.outline = max(style.outline, 2.5)
+        style.shadow = max(style.shadow, 1.0)
+
+    console.print(f"[bold cyan]🎨 Applied font '{target_font}' across all {len(subs.styles)} style(s)![/bold cyan]")
+
 def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSAFile:
     """
-    Loads subtitle file using pysubs2 and formats it into stylized ASS format.
+    Loads subtitle file using pysubs2 and formats all styles with the target custom font.
     """
     subs = pysubs2.load(str(sub_path.resolve()))
-
-    # Apply / overwrite default style
-    style = pysubs2.SSAStyle()
-    style.fontname = ASS_STYLE_DEFAULTS["fontname"]
-    style.fontsize = font_size or ASS_STYLE_DEFAULTS["fontsize"]
-    style.primarycolor = pysubs2.Color(255, 255, 255)       # White text
-    style.secondarycolor = pysubs2.Color(255, 255, 0)       # Accent
-    style.outlinecolor = pysubs2.Color(0, 0, 0)             # Black outline
-    style.backcolor = pysubs2.Color(0, 0, 0, 128)           # Drop shadow
-    style.bold = True
-    style.outline = 2.5
-    style.shadow = 1.0
-    style.alignment = pysubs2.Alignment.BOTTOM_CENTER
-    style.marginl = 25
-    style.marginr = 25
-    style.marginv = 30
-
-    subs.styles["Default"] = style
-    for event in subs.events:
-        event.style = "Default"
-
+    apply_custom_font_to_all_styles(subs, font_size=font_size)
     return subs
 
 def save_ass_subtitles(subs: pysubs2.SSAFile, out_path: Path):
-    """Saves the SSAFile back as an .ass subtitle file."""
+    """Saves the SSAFile back as an .ass subtitle file ensuring custom font is locked in."""
+    apply_custom_font_to_all_styles(subs)
     subs.save(str(out_path.resolve()))
     console.print(f"[bold green]💾 Saved stylized ASS subtitles to {out_path.name}[/bold green]")

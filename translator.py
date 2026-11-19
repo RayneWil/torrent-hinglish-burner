@@ -30,64 +30,134 @@ Output:
 ]
 """
 
+class GeminiKeyManager:
+    """
+    Manages pool of multiple Gemini API keys.
+    Rotates automatically after max_requests_per_key (20) or on quota errors (429/ResourceExhausted).
+    """
+    def __init__(self, keys: List[str], max_requests_per_key: int = 20):
+        self.keys = [k.strip() for k in keys if k.strip()]
+        self.max_requests_per_key = max_requests_per_key
+        self.current_idx = 0
+        self.request_counts = [0] * len(self.keys)
+
+    @property
+    def has_keys(self) -> bool:
+        return len(self.keys) > 0 and self.current_idx < len(self.keys)
+
+    @property
+    def total_keys(self) -> int:
+        return len(self.keys)
+
+    def get_active_key(self) -> Optional[str]:
+        if self.current_idx >= len(self.keys):
+            return None
+        return self.keys[self.current_idx]
+
+    def record_success(self):
+        """Track successful request. If hits 20 requests, auto-rotate to next key."""
+        if self.current_idx < len(self.keys):
+            self.request_counts[self.current_idx] += 1
+            used = self.request_counts[self.current_idx]
+            console.print(
+                f"[dim]🔑 Key #{self.current_idx + 1}/{len(self.keys)}: "
+                f"{used}/{self.max_requests_per_key} requests used[/dim]"
+            )
+            if used >= self.max_requests_per_key:
+                self.rotate(reason=f"Quota of {self.max_requests_per_key} requests reached")
+
+    def rotate(self, reason: str = ""):
+        """Switch to the next available API key."""
+        old_idx = self.current_idx
+        self.current_idx += 1
+        if self.current_idx < len(self.keys):
+            console.print(
+                f"[bold yellow]🔄 Key #{old_idx + 1} shifted ({reason}). "
+                f"Now switching to Key #{self.current_idx + 1}/{len(self.keys)}...[/bold yellow]"
+            )
+        else:
+            console.print(f"[bold red]❌ All {len(self.keys)} API Keys have been exhausted![/bold red]")
+
 def clean_sub_text(text: str) -> str:
     """Removes existing ASS/HTML formatting tags from text."""
-    # Remove ASS override tags like {\an8}, {\b1}, etc.
     text = re.sub(r"\{.*?\}", "", text)
-    # Replace line breaks
     text = text.replace("\\N", " ").replace("\\n", " ")
     return text.strip()
 
-def translate_batch_gemini(batch: List[Dict], api_key: str) -> List[Dict]:
+def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager) -> List[Dict]:
     """
-    Translates a batch of subtitle entries into Hinglish using Google Gemini.
+    Translates a 30-line batch using the currently active Gemini API key.
+    Automatically rotates keys if 429 quota is hit or after 20 requests.
     """
     import google.generativeai as genai
 
-    genai.configure(api_key=api_key)
-    # Use gemini-1.5-flash or gemini-2.0-flash / gemini-2.5-flash
-    model = genai.GenerativeModel("gemini-1.5-flash")
-
-    input_json = json.dumps(batch, ensure_ascii=False)
-    prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
-
-    try:
-        response = model.generate_content(prompt)
-        raw_text = response.text.strip()
-
-        # Clean markdown codeblocks if returned
-        if raw_text.startswith("```"):
-            raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
-            raw_text = re.sub(r"\n```$", "", raw_text)
-
-        translated_batch = json.loads(raw_text)
-        return translated_batch
-    except Exception as e:
-        console.print(f"[bold yellow]⚠️ Batch translation failed: {e}. Retrying in 2s...[/bold yellow]")
-        time.sleep(2)
+    while key_manager.has_keys:
+        active_key = key_manager.get_active_key()
         try:
+            genai.configure(api_key=active_key)
+            model = genai.GenerativeModel("gemini-1.5-flash")
+
+            input_json = json.dumps(batch, ensure_ascii=False)
+            prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
+
             response = model.generate_content(prompt)
             raw_text = response.text.strip()
+
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
                 raw_text = re.sub(r"\n```$", "", raw_text)
-            return json.loads(raw_text)
-        except Exception as retry_err:
-            console.print(f"[bold red]❌ Batch retry failed: {retry_err}. Keeping original text for this batch.[/bold red]")
-            return batch
+
+            translated_batch = json.loads(raw_text)
+            key_manager.record_success()
+            return translated_batch
+
+        except Exception as e:
+            err_str = str(e).lower()
+            # If quota exceeded / 429 rate limit hit, switch to next key immediately
+            if any(term in err_str for term in ["429", "quota", "resourceexhausted", "limit"]):
+                console.print(f"[bold yellow]⚠️ Quota limit hit on Key #{key_manager.current_idx + 1}: {e}[/bold yellow]")
+                key_manager.rotate(reason="429 Rate/Quota Limit")
+                time.sleep(1)
+                continue
+            else:
+                console.print(f"[bold yellow]⚠️ Translation error: {e}. Retrying...[/bold yellow]")
+                time.sleep(2)
+                try:
+                    response = model.generate_content(prompt)
+                    raw_text = response.text.strip()
+                    if raw_text.startswith("```"):
+                        raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
+                        raw_text = re.sub(r"\n```$", "", raw_text)
+                    translated_batch = json.loads(raw_text)
+                    key_manager.record_success()
+                    return translated_batch
+                except Exception as retry_err:
+                    console.print(f"[bold red]❌ Retry failed: {retry_err}. Switching key to continue...[/bold red]")
+                    key_manager.rotate(reason="Retry error")
+
+    console.print("[bold red]❌ No active Gemini API key remaining. Keeping original lines for this batch.[/bold red]")
+    return batch
 
 def translate_subtitles_to_hinglish(
     subs: pysubs2.SSAFile,
-    api_key: str,
-    batch_size: int = 35
+    api_keys: List[str],
+    batch_size: int = 30,
+    max_requests_per_key: int = 20
 ) -> pysubs2.SSAFile:
     """
-    Translates all dialogue lines in pysubs2 SSAFile to Hinglish in batches.
+    Translates all dialogue lines in pysubs2 SSAFile to Hinglish:
+    - 30 lines per request
+    - Automatically rotates to next key after 20 requests or on quota exhaustion.
     """
-    if not api_key:
-        console.print("[bold red]❌ GEMINI_API_KEY is required for Hinglish translation![/bold red]")
-        console.print("Please set GEMINI_API_KEY in .env or pass via --api-key.")
+    key_manager = GeminiKeyManager(api_keys, max_requests_per_key=max_requests_per_key)
+
+    if not key_manager.has_keys:
+        console.print("[bold red]❌ No valid Gemini API Keys provided![/bold red]")
+        console.print("Please provide API keys in .env (GEMINI_API_KEYS=key1,key2,...) or via CLI.")
         return subs
+
+    console.print(f"[bold cyan]🔑 Loaded {key_manager.total_keys} Gemini API Key(s) into Rotation Pool[/bold cyan]")
+    console.print(f"[dim]Rule: 1 request = {batch_size} lines | Max {max_requests_per_key} requests per key before auto-switch[/dim]")
 
     # Extract all dialogue lines
     dialogues_to_translate = []
@@ -99,9 +169,9 @@ def translate_subtitles_to_hinglish(
             dialogues_to_translate.append({"id": idx, "text": cleaned})
 
     total_lines = len(dialogues_to_translate)
-    console.print(f"[bold cyan]🌐 Translating {total_lines} subtitle lines to Hinglish...[/bold cyan]")
+    console.print(f"[bold cyan]🌐 Translating {total_lines} subtitle lines to Hinglish in batches of {batch_size}...[/bold cyan]")
 
-    # Split into batches
+    # Split into exact batches of 30 lines
     batches = [
         dialogues_to_translate[i:i + batch_size]
         for i in range(0, total_lines, batch_size)
@@ -109,10 +179,10 @@ def translate_subtitles_to_hinglish(
 
     translations_map = {}
     for batch in track(batches, description="[green]Translating batches..."):
-        translated_results = translate_batch_gemini(batch, api_key)
+        translated_results = translate_batch_with_retry(batch, key_manager)
         for item in translated_results:
             translations_map[item["id"]] = item["text"]
-        # Small delay to respect rate limits
+        # Small delay between requests
         time.sleep(0.3)
 
     # Apply translated texts back to SSAFile

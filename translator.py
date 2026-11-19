@@ -1,6 +1,8 @@
 import json
 import re
 import time
+import urllib.request
+import urllib.error
 from typing import List, Dict, Optional
 from rich.console import Console
 from rich.progress import track
@@ -14,7 +16,7 @@ CRITICAL GUIDELINES:
 1. SCRIPT: NEVER use Devanagari script (क, ख, ग). Strictly use the Roman English alphabet (e.g., "Bhai tu kahan ja raha hai?", "Mujhe ye bilkul pasand nahi aaya").
 2. TONE: Keep it natural, conversational, and context-appropriate (like modern Indian OTT web series or movies).
 3. PRESERVATION: Keep proper nouns, character names, places, technical jargon, and international terms in English.
-4. FORMAT: You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text".
+4. FORMAT: You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
 
 Example:
 Input:
@@ -84,25 +86,50 @@ def clean_sub_text(text: str) -> str:
     text = text.replace("\\N", " ").replace("\\n", " ")
     return text.strip()
 
+def call_gemini_rest(prompt_text: str, api_key: str, model_name: str = "gemini-3.8-flash") -> str:
+    """Direct REST call using standard library urllib (zero external pip packages)."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt_text}
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2
+        }
+    }
+    data_bytes = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data_bytes,
+        headers={"Content-Type": "application/json"}
+    )
+    with urllib.request.urlopen(req, timeout=30) as response:
+        res_json = json.loads(response.read().decode("utf-8"))
+        candidates = res_json.get("candidates", [])
+        if candidates:
+            parts = candidates[0].get("content", {}).get("parts", [])
+            if parts:
+                return parts[0].get("text", "")
+    return ""
+
 def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager) -> List[Dict]:
     """
-    Translates a 30-line batch using the currently active Gemini API key.
-    Automatically rotates keys if 429 quota is hit or after 20 requests.
+    Translates a 30-line batch using direct REST API.
+    Auto-rotates to next key on quota limit (429) or after 20 requests.
     """
-    import google.generativeai as genai
-
     while key_manager.has_keys:
         active_key = key_manager.get_active_key()
+        input_json = json.dumps(batch, ensure_ascii=False)
+        full_prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
+
         try:
-            genai.configure(api_key=active_key)
-            model = genai.GenerativeModel("gemini-1.5-flash")
+            raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
 
-            input_json = json.dumps(batch, ensure_ascii=False)
-            prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
-
-            response = model.generate_content(prompt)
-            raw_text = response.text.strip()
-
+            # Clean markdown codeblocks if returned
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
                 raw_text = re.sub(r"\n```$", "", raw_text)
@@ -111,20 +138,20 @@ def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager)
             key_manager.record_success()
             return translated_batch
 
-        except Exception as e:
-            err_str = str(e).lower()
-            # If quota exceeded / 429 rate limit hit, switch to next key immediately
-            if any(term in err_str for term in ["429", "quota", "resourceexhausted", "limit"]):
-                console.print(f"[bold yellow]⚠️ Quota limit hit on Key #{key_manager.current_idx + 1}: {e}[/bold yellow]")
-                key_manager.rotate(reason="429 Rate/Quota Limit")
+        except urllib.error.HTTPError as e:
+            err_code = e.code
+            err_msg = e.read().decode("utf-8", errors="ignore")
+            # Rate limit / Quota exceeded
+            if err_code in (429, 403) or "quota" in err_msg.lower() or "resourceexhausted" in err_msg.lower():
+                console.print(f"[bold yellow]⚠️ Quota limit hit on Key #{key_manager.current_idx + 1} (HTTP {err_code})[/bold yellow]")
+                key_manager.rotate(reason=f"HTTP {err_code} Quota Limit")
                 time.sleep(1)
                 continue
             else:
-                console.print(f"[bold yellow]⚠️ Translation error: {e}. Retrying...[/bold yellow]")
+                console.print(f"[bold yellow]⚠️ HTTP error {err_code}: {err_msg[:120]}. Retrying in 2s...[/bold yellow]")
                 time.sleep(2)
                 try:
-                    response = model.generate_content(prompt)
-                    raw_text = response.text.strip()
+                    raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
                     if raw_text.startswith("```"):
                         raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
                         raw_text = re.sub(r"\n```$", "", raw_text)
@@ -132,8 +159,23 @@ def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager)
                     key_manager.record_success()
                     return translated_batch
                 except Exception as retry_err:
-                    console.print(f"[bold red]❌ Retry failed: {retry_err}. Switching key to continue...[/bold red]")
-                    key_manager.rotate(reason="Retry error")
+                    console.print(f"[bold red]❌ Retry failed: {retry_err}. Switching key...[/bold red]")
+                    key_manager.rotate(reason="Retry failed")
+
+        except Exception as e:
+            console.print(f"[bold yellow]⚠️ Translation error: {e}. Retrying...[/bold yellow]")
+            time.sleep(2)
+            try:
+                raw_text = call_gemini_rest(full_prompt, active_key, model_name="gemini-3.8-flash").strip()
+                if raw_text.startswith("```"):
+                    raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
+                    raw_text = re.sub(r"\n```$", "", raw_text)
+                translated_batch = json.loads(raw_text)
+                key_manager.record_success()
+                return translated_batch
+            except Exception as retry_err:
+                console.print(f"[bold red]❌ Batch retry failed: {retry_err}. Moving to next key...[/bold red]")
+                key_manager.rotate(reason="Exception retry failed")
 
     console.print("[bold red]❌ No active Gemini API key remaining. Keeping original lines for this batch.[/bold red]")
     return batch

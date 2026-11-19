@@ -58,7 +58,7 @@ def parse_args():
     parser.add_argument(
         "-o", "--output-dir",
         type=str,
-        default=str(config.OUTPUT_DIR),
+        default=str(config.VIDEO_OUTPUT_DIR),
         help="Directory to save final processed video"
     )
     parser.add_argument(
@@ -135,8 +135,9 @@ def main():
             batch_size=30,
             max_requests_per_key=20
         )
-        final_ass_path = temp_dir / f"{video_file.stem}_hinglish.ass"
+        final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
         save_ass_subtitles(hinglish_subs, final_ass_path)
+        console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
 
         # Step 5: Encode video & burn-in subtitles
         console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {args.quality}[/bold yellow]")

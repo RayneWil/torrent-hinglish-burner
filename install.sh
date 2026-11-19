@@ -67,7 +67,6 @@ fi
 echo "--------------------------------------------------------"
 echo "✨ Starting DSA Subber..."
 
-# Re-attach standard input to terminal TTY so interactive menus work seamlessly
 if [ -t 0 ]; then
     python3 ui.py || python ui.py
 elif [ -e /dev/tty ]; then

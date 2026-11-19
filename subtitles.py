@@ -18,11 +18,12 @@ WATERMARK_STYLES = [
     "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,0.5,9,30,14,6,1"
 ]
 
-WATERMARK_EVENTS = [
-    r"Dialogue: 0,0:00:00.00,0:07:10.10,WatermarkTop,,0,0,0,,{\fad(2000,500)\fnComic Sans MS\c&H307DEE&\3c&HFFFFFF&\fs13\pos(380,5)}Dark{\c&H56DDB5&}Soul{\c&H215BEC&}Academy😉",
-    r"Dialogue: 0,0:07:10.10,0:15:10.10,WatermarkTop,,0,0,0,,{\fad(500,500)\fnComic Sans MS\c&H307DEE&\3c&HFFFFFF&\fs13\pos(380,5)}Dark{\c&H56DDB5&}Soul{\c&H215BEC&}Academy😈",
-    r"Dialogue: 0,0:15:10.10,0:30:00.00,WatermarkTop,,0,0,0,,{\fad(500,500)\fnComic Sans MS\c&H307DEE&\3c&HFFFFFF&\fs13\pos(380,5)}Dark{\c&H56DDB5&}Soul{\c&H215BEC&}Academy😘"
-]
+def get_watermark_events(pos_x: int, fs: int) -> List[str]:
+    return [
+        f"Dialogue: 0,0:00:00.00,0:07:10.10,WatermarkTop,,0,0,0,,{{\\fad(2000,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😉",
+        f"Dialogue: 0,0:07:10.10,0:15:10.10,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😈",
+        f"Dialogue: 0,0:15:10.10,0:30:00.00,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😘"
+    ]
 
 def check_ffmpeg() -> bool:
     """Check if ffmpeg and ffprobe are available."""
@@ -145,27 +146,51 @@ def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSA
 
 def inject_watermark_into_file(file_path: Path):
     """
-    Post-processes the .ass file to ensure:
-    - PlayResX: 384, PlayResY: 288
-    - Exact Style: Info & Style: WatermarkTop lines under [V4+ Styles]
-    - Exact 3 DarkSoulAcademy watermark lines under [Events]
+    Post-processes the .ass file according to resolution:
+    - If PlayResX 384 / PlayResY 288:
+        Uses \\fs13\\pos(380,5)
+    - If PlayResX 640 / PlayResY 360 (or widescreen):
+        Uses \\fs16\\pos(630,5)
+    - Adds Style: Info & Style: WatermarkTop under [V4+ Styles]
+    - Adds DarkSoulAcademy watermark lines under [Events]
     """
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        # 1. Update PlayResX and PlayResY to 384 and 288
-        if "PlayResX:" in content:
-            content = re.sub(r"PlayResX:\s*\d+", "PlayResX: 384", content)
+        rx_match = re.search(r"PlayResX:\s*(\d+)", content)
+        ry_match = re.search(r"PlayResY:\s*(\d+)", content)
+        rx = int(rx_match.group(1)) if rx_match else None
+        ry = int(ry_match.group(1)) if ry_match else None
+
+        # Check resolution case
+        if rx == 384 and ry == 288:
+            target_rx, target_ry = 384, 288
+            pos_x, fs = 380, 13
+        elif rx == 640 and ry == 360:
+            target_rx, target_ry = 640, 360
+            pos_x, fs = 630, 16
         else:
-            content = content.replace("[Script Info]\n", "[Script Info]\nPlayResX: 384\n")
+            # Fallback based on aspect ratio (4:3 -> 384x288, 16:9 widescreen -> 640x360)
+            if rx and ry and (abs(rx/ry - 4/3) < 0.1):
+                target_rx, target_ry = 384, 288
+                pos_x, fs = 380, 13
+            else:
+                target_rx, target_ry = 640, 360
+                pos_x, fs = 630, 16
+
+        # Update or set PlayResX & PlayResY
+        if "PlayResX:" in content:
+            content = re.sub(r"PlayResX:\s*\d+", f"PlayResX: {target_rx}", content)
+        else:
+            content = content.replace("[Script Info]\n", f"[Script Info]\nPlayResX: {target_rx}\n")
 
         if "PlayResY:" in content:
-            content = re.sub(r"PlayResY:\s*\d+", "PlayResY: 288", content)
+            content = re.sub(r"PlayResY:\s*\d+", f"PlayResY: {target_ry}", content)
         else:
-            content = content.replace("[Script Info]\n", "[Script Info]\nPlayResY: 288\n")
+            content = content.replace("[Script Info]\n", f"[Script Info]\nPlayResY: {target_ry}\n")
 
-        # 2. Inject Watermark styles under [V4+ Styles] Format: ...
+        # Inject Watermark styles under [V4+ Styles] Format: ...
         if "Style: WatermarkTop" not in content:
             style_block = "\n".join(WATERMARK_STYLES) + "\n"
             content = re.sub(
@@ -175,9 +200,9 @@ def inject_watermark_into_file(file_path: Path):
                 count=1
             )
 
-        # 3. Inject Watermark dialogues under [Events] Format: ...
+        # Inject Watermark dialogues under [Events] Format: ...
         if "DarkSoulAcademy" not in content:
-            events_block = "\n".join(WATERMARK_EVENTS) + "\n"
+            events_block = "\n".join(get_watermark_events(pos_x, fs)) + "\n"
             content = re.sub(
                 r"(\[Events\]\s*\nFormat:[^\n]*\n)",
                 lambda m: m.group(1) + events_block,
@@ -188,7 +213,7 @@ def inject_watermark_into_file(file_path: Path):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        console.print("[bold green]🌟 Injected Custom Watermark (DarkSoulAcademy) & PlayRes(384x288) successfully![/bold green]")
+        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},5), fs{fs}) successfully![/bold green]")
     except Exception as e:
         console.print(f"[bold yellow]⚠️ Watermark injection warning: {e}[/bold yellow]")
 

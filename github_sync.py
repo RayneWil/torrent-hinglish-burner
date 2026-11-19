@@ -126,6 +126,8 @@ def sync_all_files(token: str, username: Optional[str] = None, repo_name: str = 
         "translator.py",
         "encoder.py",
         "cli.py",
+        "ui.py",
+        "install.sh",
         "setup.sh",
         "github_sync.py"
     ]

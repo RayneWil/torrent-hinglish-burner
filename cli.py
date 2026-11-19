@@ -39,8 +39,8 @@ def parse_args():
     parser.add_argument(
         "-t", "--torrent",
         type=str,
-        required=True,
-        help="Magnet URI or path to .torrent file"
+        default=None,
+        help="Magnet URI or path to .torrent file (Leave empty to launch Interactive UI)"
     )
     parser.add_argument(
         "-q", "--quality",
@@ -72,11 +72,23 @@ def parse_args():
         action="store_true",
         help="Keep temporary downloaded & intermediate subtitle files"
     )
+    parser.add_argument(
+        "--ui",
+        action="store_true",
+        help="Launch interactive Terminal UI"
+    )
     return parser.parse_args()
 
 def main():
-    print_banner()
     args = parse_args()
+
+    # If no torrent link provided or --ui flag is passed, launch interactive UI
+    if args.ui or not args.torrent:
+        from ui import main_menu
+        main_menu()
+        return
+
+    print_banner()
 
     # Determine API keys list
     if args.api_keys:

@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -38,11 +39,37 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 # Working Directories
 TEMP_DIR = Path(os.getenv("TEMP_DIR", BASE_DIR / "temp"))
-OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", BASE_DIR / "output"))
-
-# Create directories if they don't exist
 TEMP_DIR.mkdir(parents=True, exist_ok=True)
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+def get_anime_burn_dir() -> Path:
+    """
+    Detects device download directory (Termux / Android, Windows, Mac, Linux)
+    and returns 'Download/Anime Burn' directory path.
+    """
+    # 1. Android Termux paths
+    candidates = [
+        Path("/sdcard/Download/Anime Burn"),
+        Path.home() / "storage/downloads/Anime Burn",
+        Path.home() / "storage/shared/Download/Anime Burn"
+    ]
+    for c in candidates:
+        if c.parent.exists() or Path("/sdcard").exists():
+            c.mkdir(parents=True, exist_ok=True)
+            return c
+
+    # 2. Windows / Mac / Linux standard Downloads folder
+    user_home = Path.home()
+    std_download = user_home / "Downloads" / "Anime Burn"
+    try:
+        std_download.mkdir(parents=True, exist_ok=True)
+        return std_download
+    except Exception:
+        # Fallback to local project folder if home is restricted
+        local_dir = BASE_DIR / "Anime Burn"
+        local_dir.mkdir(parents=True, exist_ok=True)
+        return local_dir
+
+OUTPUT_DIR = get_anime_burn_dir()
 
 # Quality presets
 QUALITY_MAP = {

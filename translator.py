@@ -19,26 +19,51 @@ CANDIDATE_MODELS = [
     "gemini-3.1-flash-lite-preview"
 ]
 
-HINGLISH_PROMPT = """You are an expert subtitle translator. Translate the following video subtitles into natural, modern, conversational Hinglish (Hindi written using the Roman/English alphabet, exactly how people speak and text in India).
+HINGLISH_PROMPT = """ROLE:
+You are a professional anime subtitle translator.
+Your task is to translate subtitle files into natural, emotional, and smooth Hinglish.
+Translation must sound human, casual, anime-style, and expressive — NOT word-to-word.
 
-CRITICAL GUIDELINES:
-1. SCRIPT: NEVER use Devanagari script (क, ख, ग). Strictly use the Roman English alphabet (e.g., "Bhai tu kahan ja raha hai?", "Mujhe ye bilkul pasand nahi aaya").
-2. TONE: Keep it natural, conversational, and context-appropriate (like modern Indian OTT web series or anime dubs).
-3. PRESERVATION: Keep proper nouns, character names, places, technical jargon, and international terms in English.
-4. FORMAT: You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
+LANGUAGE & STYLE RULES:
+- Use “Mai” for “I” and “Tum” for “You”.
+- Avoid heavy English. Use only very common English words when they feel natural.
+- Dialogues must be short, impactful, and sound like real-life conversation.
+- Maintain original character personality and mood (tsundere, senpai, angry, shy, calm, etc.).
+- Emotion and intent are more important than literal meaning.
+- Gender mistakes are strictly forbidden.
 
-Example:
-Input:
-[
-  {"id": 1, "text": "What are you doing here?"},
-  {"id": 2, "text": "I came to check on you, bro."}
-]
+BACKGROUND & NON-DIALOGUE RULES:
+- Background sounds (ahh, hmm, mmh, sighs, laughs, etc.) must remain unchanged if already present.
+- Do not remove or add background sounds.
 
-Output:
-[
-  {"id": 1, "text": "Tu yahan kya kar raha hai?"},
-  {"id": 2, "text": "Main bas tereko check karne aaya tha, bro."}
-]
+TRANSLATION RULES:
+- Avoid over-literal translation.
+- Keep dialogue as short as possible while preserving meaning.
+- Maintain anime-style flow and natural Hinglish rhythm.
+- Do not add extra explanations or notes.
+
+WORD STYLE (Allowed English → Hinglish):
+- I'm sorry  → mujhe maaf karna  
+- Sorry → maaf karna  
+- stupid → chutiya
+- Motherfucker → maderchod
+- sisterfucker → bahenchod
+- Piece of shit → bilkul bekaar insaan / ghatiya aadmi
+- Bastard → haraami / nalayak 
+- Dickhead → bewakoof saala
+- Bullshit → bakwaas / faltu baat
+- Thanks / Thank you → shukriya  
+- Good morning → good morning  
+- Good night → good night  
+- Love → pyaar / love (depending on scene mood)
+
+STRICT RULE MUST FOLLOW:
+- Look at the dialogue and understand who is speaking—and to whom—in terms of gender. 
+- Ensure that the verb endings (like 'raha hoon', 'rahi hoon', 'rahe ho', 'karunga', 'karungi') are consistent with that gender. 
+- Maintain this throughout.
+
+TECHNICAL FORMAT:
+You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
 """
 
 class GeminiKeyManager:

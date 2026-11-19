@@ -177,7 +177,8 @@ def start_burning_workflow(quality: str):
         ))
 
     except Exception as e:
-        console.print(f"\n[bold red]❌ Error occurred: {e}[/bold red]")
+        console.print("\n[bold red]❌ Error occurred:[/bold red]")
+        console.print(str(e), markup=False)
     finally:
         # Cleanup temp directory
         if temp_dir.exists():

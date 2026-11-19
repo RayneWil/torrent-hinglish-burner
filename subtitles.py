@@ -13,16 +13,22 @@ console = Console()
 
 SUBTITLE_EXTENSIONS = {".ass", ".srt", ".vtt", ".sub"}
 
-WATERMARK_STYLES = [
+# Style presets for SD (384x288, 640x360) and HD (1280x720)
+STYLES_SD = [
     "Style: Info,Roboto Medium,26,&H00FFFFFF,&H000000FF,&H00000000,&H24000000,0,0,0,0,100,100,0,0,1,1.0,0.8,2,20,20,20,1",
     "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,0.5,9,30,14,6,1"
 ]
 
-def get_watermark_events(pos_x: int, fs: int) -> List[str]:
+STYLES_720P = [
+    "Style: Info,HelveticaRounded LT Std BdCn,54,&H00FFFFFF,&H00FFFFFF,&H00000000,&H64000000,-1,0,0,0,100,100,0.8,0,1,2,2,2,30,30,40,1",
+    "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,1.0,9,30,14,6,1"
+]
+
+def get_watermark_events(pos_x: int, pos_y: int, fs: int) -> List[str]:
     return [
-        f"Dialogue: 0,0:00:00.00,0:07:10.10,WatermarkTop,,0,0,0,,{{\\fad(2000,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😉",
-        f"Dialogue: 0,0:07:10.10,0:15:10.10,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😈",
-        f"Dialogue: 0,0:15:10.10,0:30:00.00,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},5)}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😘"
+        f"Dialogue: 0,0:00:00.00,0:07:10.10,WatermarkTop,,0,0,0,,{{\\fad(2000,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},{pos_y})}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😉",
+        f"Dialogue: 0,0:07:10.10,0:15:10.10,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},{pos_y})}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😈",
+        f"Dialogue: 0,0:15:10.10,0:30:00.00,WatermarkTop,,0,0,0,,{{\\fad(500,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},{pos_y})}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😘"
     ]
 
 def check_ffmpeg() -> bool:
@@ -147,12 +153,9 @@ def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSA
 def inject_watermark_into_file(file_path: Path):
     """
     Post-processes the .ass file according to resolution:
-    - If PlayResX 384 / PlayResY 288:
-        Uses \\fs13\\pos(380,5)
-    - If PlayResX 640 / PlayResY 360 (or widescreen):
-        Uses \\fs16\\pos(630,5)
-    - Adds Style: Info & Style: WatermarkTop under [V4+ Styles]
-    - Adds DarkSoulAcademy watermark lines under [Events]
+    - 384x288:  Style SD, \\fs13\\pos(380,5)
+    - 640x360:  Style SD, \\fs16\\pos(630,5)
+    - 1280x720: Style 720P, \\fs32\\pos(1260,10)
     """
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -166,18 +169,35 @@ def inject_watermark_into_file(file_path: Path):
         # Check resolution case
         if rx == 384 and ry == 288:
             target_rx, target_ry = 384, 288
-            pos_x, fs = 380, 13
+            pos_x, pos_y, fs = 380, 5, 13
+            target_styles = STYLES_SD
         elif rx == 640 and ry == 360:
             target_rx, target_ry = 640, 360
-            pos_x, fs = 630, 16
+            pos_x, pos_y, fs = 630, 5, 16
+            target_styles = STYLES_SD
+        elif rx == 1280 and ry == 720:
+            target_rx, target_ry = 1280, 720
+            pos_x, pos_y, fs = 1260, 10, 32
+            target_styles = STYLES_720P
         else:
-            # Fallback based on aspect ratio (4:3 -> 384x288, 16:9 widescreen -> 640x360)
-            if rx and ry and (abs(rx/ry - 4/3) < 0.1):
-                target_rx, target_ry = 384, 288
-                pos_x, fs = 380, 13
+            # Fallback by resolution size / aspect ratio
+            if rx and ry:
+                if rx >= 1280 or ry >= 720:
+                    target_rx, target_ry = 1280, 720
+                    pos_x, pos_y, fs = 1260, 10, 32
+                    target_styles = STYLES_720P
+                elif abs(rx/ry - 4/3) < 0.1:
+                    target_rx, target_ry = 384, 288
+                    pos_x, pos_y, fs = 380, 5, 13
+                    target_styles = STYLES_SD
+                else:
+                    target_rx, target_ry = 640, 360
+                    pos_x, pos_y, fs = 630, 5, 16
+                    target_styles = STYLES_SD
             else:
-                target_rx, target_ry = 640, 360
-                pos_x, fs = 630, 16
+                target_rx, target_ry = 1280, 720
+                pos_x, pos_y, fs = 1260, 10, 32
+                target_styles = STYLES_720P
 
         # Update or set PlayResX & PlayResY
         if "PlayResX:" in content:
@@ -192,7 +212,7 @@ def inject_watermark_into_file(file_path: Path):
 
         # Inject Watermark styles under [V4+ Styles] Format: ...
         if "Style: WatermarkTop" not in content:
-            style_block = "\n".join(WATERMARK_STYLES) + "\n"
+            style_block = "\n".join(target_styles) + "\n"
             content = re.sub(
                 r"(\[V4\+ Styles\]\s*\nFormat:[^\n]*\n)",
                 lambda m: m.group(1) + style_block,
@@ -202,7 +222,7 @@ def inject_watermark_into_file(file_path: Path):
 
         # Inject Watermark dialogues under [Events] Format: ...
         if "DarkSoulAcademy" not in content:
-            events_block = "\n".join(get_watermark_events(pos_x, fs)) + "\n"
+            events_block = "\n".join(get_watermark_events(pos_x, pos_y, fs)) + "\n"
             content = re.sub(
                 r"(\[Events\]\s*\nFormat:[^\n]*\n)",
                 lambda m: m.group(1) + events_block,
@@ -213,7 +233,7 @@ def inject_watermark_into_file(file_path: Path):
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
 
-        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},5), fs{fs}) successfully![/bold green]")
+        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},{pos_y}), fs{fs}) successfully![/bold green]")
     except Exception as e:
         console.print(f"[bold yellow]⚠️ Watermark injection warning: {e}[/bold yellow]")
 

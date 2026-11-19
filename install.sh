@@ -48,14 +48,30 @@ else
     cd "$REPO_DIR"
 fi
 
-# 3. Install Lightweight Python Requirements (pure wheels, no compilation)
+# 3. Install Lightweight Python Requirements
 echo "🐍 Installing Python packages (pysubs2, rich)..."
 pip install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
 pip install -r requirements.txt --quiet 2>/dev/null || \
 pip3 install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
 pip3 install -r requirements.txt --quiet
 
-# 4. Launch DSA Subber Interactive UI
+# 4. Add handy 'subber' alias to shell profile if not present
+BASHRC="$HOME/.bashrc"
+if [ -f "$BASHRC" ]; then
+    if ! grep -q "alias subber=" "$BASHRC"; then
+        echo "alias subber=\"cd $REPO_DIR && python3 ui.py\"" >> "$BASHRC"
+    fi
+fi
+
+# 5. Launch DSA Subber Interactive UI with real TTY attached
 echo "--------------------------------------------------------"
 echo "✨ Starting DSA Subber..."
-python3 ui.py || python ui.py
+
+# Re-attach standard input to terminal TTY so interactive menus work seamlessly
+if [ -t 0 ]; then
+    python3 ui.py || python ui.py
+elif [ -e /dev/tty ]; then
+    python3 ui.py </dev/tty || python ui.py </dev/tty
+else
+    python3 ui.py || python ui.py
+fi

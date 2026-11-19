@@ -15,7 +15,7 @@ if [ -d "/data/data/com.termux" ] || [ -n "$PREFIX" ]; then
     echo "📱 Mobile (Termux) environment detected!"
     echo "📦 Checking and installing dependencies (python, ffmpeg, aria2, git)..."
     pkg update -y
-    pkg install -y git python ffmpeg aria2 clang make
+    pkg install -y git python ffmpeg aria2
 
     # Ensure Termux storage permission
     if [ ! -d "$HOME/storage" ]; then
@@ -48,9 +48,12 @@ else
     cd "$REPO_DIR"
 fi
 
-# 3. Install Python Requirements
-echo "🐍 Installing Python packages..."
-pip install -r requirements.txt --quiet --no-warn-script-location 2>/dev/null || pip3 install -r requirements.txt --quiet
+# 3. Install Lightweight Python Requirements (pure wheels, no compilation)
+echo "🐍 Installing Python packages (pysubs2, rich)..."
+pip install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
+pip install -r requirements.txt --quiet 2>/dev/null || \
+pip3 install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
+pip3 install -r requirements.txt --quiet
 
 # 4. Launch DSA Subber Interactive UI
 echo "--------------------------------------------------------"

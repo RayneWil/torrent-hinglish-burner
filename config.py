@@ -1,11 +1,29 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-# Load .env file
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
+
+# Fallback .env parser in case python-dotenv is not installed
+def load_env_file(filepath: Path):
+    if not filepath.exists():
+        return
+    with open(filepath, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" in line:
+                key, val = line.split("=", 1)
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key not in os.environ:
+                    os.environ[key] = val
+
+try:
+    from dotenv import load_dotenv
+    load_dotenv(BASE_DIR / ".env")
+except ImportError:
+    load_env_file(BASE_DIR / ".env")
 
 # Gemini API Keys Pool (supports multiple comma-separated keys or single key)
 raw_keys = os.getenv("GEMINI_API_KEYS", "")

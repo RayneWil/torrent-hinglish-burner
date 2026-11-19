@@ -1,15 +1,54 @@
-# Torrent to Hinglish Burner CLI
+# 🔥 DSA Subber (Torrent to Hinglish Burner CLI)
 
-[![Python](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
+[![Termux](https://img.shields.io/badge/Termux-Supported-orange.svg)](https://termux.dev/)
+[![Linux](https://img.shields.io/badge/Linux-Supported-blue.svg)](https://www.kernel.org/)
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-Supported-green.svg)](https://ffmpeg.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A fully automated, terminal-based CLI pipeline that:
-1. Downloads video from any **Magnet / Torrent link** via `aria2c`.
-2. Extracts embedded or external subtitles (`.ass` / `.srt`).
-3. Translates the subtitles into natural conversational **Hinglish** (Romanized Hindi) using AI (Gemini Flash / LLM).
-4. Converts and styles subtitles into high-visibility `.ass` format.
-5. Burns the subtitles into the video and compresses it to **480p** or **720p** using `ffmpeg`.
+An automated, terminal-based pipeline that downloads torrents, translates subtitles into conversational **Hinglish** (.ass) with AI, and burns them into **480p** or **720p** video directly saved into your phone or PC's **`Download/Anime Burn`** folder.
+
+Works on **Termux (Android)**, **Linux VPS**, **Google Colab**, **macOS**, and **Windows**.
+
+---
+
+## ⚡ 1-Line Quickstart (Termux / Linux / VPS)
+
+Just paste this **one single command** into your terminal (Termux, Ubuntu, or VPS). It will automatically install all requirements, pull the code, and launch the **DSA Subber Ready** interface:
+
+```bash
+curl -sSL https://raw.githubusercontent.com/RayneWil/torrent-hinglish-burner/main/install.sh | bash
+```
+
+---
+
+## 📱 Interactive Terminal UI (`DSA Subber Ready`)
+
+When you run the command, you will be greeted by the interactive menu:
+
+```
+==================================================================
+                     🔥 DSA Subber Ready 🔥
+       Automated Torrent to Hinglish Burner (Termux & Linux)
+==================================================================
+
+Select an option:
+[1] 🔥 Start Burning
+[2] 🔑 Change API Key
+[3] ⚙️ Change Quality (Current: 720p)
+[4] 📂 Open Anime Burn Folder
+[5] 🚪 Exit
+```
+
+1. Select **`[1] Start Burning`**
+2. Paste your **Torrent link / Magnet URI**.
+3. Watch the live progress bar as it:
+   - Downloads the torrent via `aria2c`
+   - Extracts the subtitle track
+   - Translates subtitles (30 lines/req with 5 API key auto-rotation)
+   - Burns `.ass` subtitles into video and compresses to 480p or 720p
+4. The final video is automatically saved in:
+   - **Termux (Mobile):** `/sdcard/Download/Anime Burn/<Video_Name>.mp4`
+   - **PC / Linux:** `~/Downloads/Anime Burn/<Video_Name>.mp4`
 
 ---
 

@@ -129,6 +129,7 @@ def sync_all_files(token: str, username: Optional[str] = None, repo_name: str = 
         "ui.py",
         "install.sh",
         "setup.sh",
+        "fonts/Helvetica_Rounded_LT_Std_Bold_Condensed.otf",
         "github_sync.py"
     ]
 

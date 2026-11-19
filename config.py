@@ -119,9 +119,12 @@ QUALITY_MAP = {
     }
 }
 
+# Fonts Directory
+FONTS_DIR = BASE_DIR / "fonts"
+
 # ASS Subtitle Default Styling
 ASS_STYLE_DEFAULTS = {
-    "fontname": "Arial",
+    "fontname": "HelveticaRounded LT Std BdCn",
     "fontsize": 22,
     "primarycolor": "&H00FFFFFF",     # Bright White
     "secondarycolor": "&H000000FF",   # Yellow/Accent

@@ -151,6 +151,43 @@ def call_gemini_rest(prompt_text: str, api_key: str, model_name: str) -> str:
                 return parts[0].get("text", "")
     return ""
 
+def parse_gemini_json_response(raw_text: str) -> List[Dict]:
+    """Robust 3-tier JSON parser for Gemini subtitle outputs."""
+    raw_text = raw_text.strip()
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```(?:json)?\s*\n?", "", raw_text)
+        raw_text = re.sub(r"\n?```\s*$", "", raw_text)
+    raw_text = raw_text.strip()
+
+    # Tier 1: Standard JSON parse with non-strict control characters
+    try:
+        return json.loads(raw_text, strict=False)
+    except Exception:
+        pass
+
+    # Tier 2: Extract JSON array substring
+    array_match = re.search(r"\[\s*\{.*\}\s*\]", raw_text, re.DOTALL)
+    if array_match:
+        try:
+            return json.loads(array_match.group(0), strict=False)
+        except Exception:
+            pass
+
+    # Tier 3: Regex item-by-item extraction for dialogues with quotes
+    items = []
+    pattern = re.compile(r'\{\s*"id"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*"(.*?)"\s*\}', re.DOTALL)
+    for m in pattern.finditer(raw_text):
+        try:
+            item_id = int(m.group(1))
+            item_text = m.group(2).replace('\\"', '"').replace('\n', ' ')
+            items.append({"id": item_id, "text": item_text})
+        except Exception:
+            continue
+    if items:
+        return items
+
+    return json.loads(raw_text, strict=False)
+
 def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager) -> List[Dict]:
     """
     Translates a 30-line batch using direct REST API.
@@ -168,11 +205,7 @@ def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager)
             try:
                 raw_text = call_gemini_rest(full_prompt, active_key, model_name=model).strip()
 
-                if raw_text.startswith("```"):
-                    raw_text = re.sub(r"^```(?:json)?\n", "", raw_text)
-                    raw_text = re.sub(r"\n```$", "", raw_text)
-
-                translated_batch = json.loads(raw_text)
+                translated_batch = parse_gemini_json_response(raw_text)
                 key_manager.record_success()
                 return translated_batch
 

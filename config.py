@@ -7,8 +7,16 @@ load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 
-# API Keys
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+# Gemini API Keys Pool (supports multiple comma-separated keys or single key)
+raw_keys = os.getenv("GEMINI_API_KEYS", "")
+if raw_keys:
+    GEMINI_API_KEYS = [k.strip() for k in raw_keys.split(",") if k.strip()]
+else:
+    single_key = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_API_KEYS = [single_key.strip()] if single_key.strip() else []
+
+# GitHub Token
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
 # Working Directories
 TEMP_DIR = Path(os.getenv("TEMP_DIR", BASE_DIR / "temp"))

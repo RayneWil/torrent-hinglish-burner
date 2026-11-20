@@ -58,9 +58,9 @@ def burn_subtitles_and_encode(
     fonts_dir = config.BASE_DIR / "fonts"
     if fonts_dir.exists():
         escaped_fonts = escape_ffmpeg_filter_path(fonts_dir)
-        vf_filter = f"ass='{escaped_ass}':fontsdir='{escaped_fonts}',scale=-2:{height}"
+        vf_filter = f"scale=-2:{height},ass='{escaped_ass}':fontsdir='{escaped_fonts}'"
     else:
-        vf_filter = f"ass='{escaped_ass}',scale=-2:{height}"
+        vf_filter = f"scale=-2:{height},ass='{escaped_ass}'"
 
     total_duration = get_video_duration(video_path)
 
@@ -75,8 +75,9 @@ def burn_subtitles_and_encode(
         "-i", str(video_path.resolve()),
         "-vf", vf_filter,
         "-c:v", "libx264",
-        "-preset", "fast",
+        "-preset", "veryfast",
         "-crf", "23",
+        "-threads", "0",
         "-c:a", "aac",
         "-b:a", audio_bitrate,
         "-sn",  # Drop embedded subtitle streams since we are burning them in
@@ -143,8 +144,8 @@ def burn_subtitles_and_encode(
                         tot_s = int(total_duration % 60)
                         tot_str = f"{tot_h:02d}:{tot_m:02d}:{tot_s:02d}"
 
-                        # Update Telegram live tracker on 1% steps or completion
-                        if pct - last_notified_pct >= 1.0 or line_str == "progress=end":
+                        # Update Telegram live tracker on 5% steps or completion (prevents network choke)
+                        if pct - last_notified_pct >= 5.0 or line_str == "progress=end":
                             last_notified_pct = pct
                             notifier.update_encoding_progress(percent=pct, current_time=curr_str, total_time=tot_str)
 

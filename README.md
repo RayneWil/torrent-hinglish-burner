@@ -5,7 +5,7 @@
 [![FFmpeg](https://img.shields.io/badge/FFmpeg-Supported-green.svg)](https://ffmpeg.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-An automated, terminal-based pipeline that downloads torrents, translates subtitles into conversational **Hinglish** (.ass) with AI, and burns them into **480p** or **720p** video directly saved into your phone or PC's **`Download/Anime Burn`** folder.
+An automated, terminal-based pipeline that downloads torrents, translates subtitles into conversational **Hinglish** (.ass) with AI, and burns them into **480p**, **720p**, or **1080p** video directly saved into your phone or PC's **`Download/Anime Burn`** folder.
 
 Works on **Termux (Android)**, **Linux VPS**, **Google Colab**, **macOS**, and **Windows**.
 
@@ -50,7 +50,7 @@ Select an option:
    - Downloads the torrent via `aria2c`
    - Extracts the subtitle track
    - Translates subtitles (30 lines/req with 5 API key auto-rotation)
-   - Burns `.ass` subtitles into video and compresses to 480p or 720p
+   - Burns `.ass` subtitles into video and compresses to 480p, 720p, or 1080p
 4. The files are automatically separated and saved in:
    - **🎬 Burned Video:** `Download/Anime Burn/Video/<Video_Name>.mp4`
    - **📝 Hinglish Subtitle:** `Download/Anime Burn/Subtitle/<Video_Name>_Hinglish.ass`

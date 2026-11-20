@@ -443,7 +443,7 @@ def build_caption(
         clean_q += "P"
 
     caption = (
-        f"<blockquote><b>» {title} •</b></blockquote>\n"
+        f"<b>» {title} •</b>\n"
         f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
         f"<b>‣ Language: Jap (Hindi Sub)</b>\n"
         f"<b>‣ Quality: {clean_q}</b>\n"

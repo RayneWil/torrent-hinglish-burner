@@ -32,7 +32,12 @@ VERY IMPORTANT FORMAT RULES (STRICT):
 - DO NOT reorder subtitles.
 - Each subtitle entry must remain exactly where it is.
 - Output structure must be IDENTICAL to the input file.
-- Do not translate into Devanagari
+
+ABSOLUTE SCRIPT & ALPHABET RULE (ZERO DEVANAGARI - CRITICAL):
+- TRANSLATE ONLY USING LATIN / ENGLISH LETTERS (A-Z, a-z, 0-9).
+- DO NOT USE DEVANAGARI SCRIPT (देवनागरी लिपि / हिंदी अक्षर) UNDER ANY CIRCUMSTANCES!
+- Outputting even a SINGLE Hindi/Devanagari character (like हाँ, क्या, नमस्ते, नहीं, etc.) breaks the subtitle font completely.
+- All Hindi words MUST be written phonetically in English/Roman alphabet (e.g., write "haan", "kya", "namaste", "nahi", "tum", "mai").
 
 LANGUAGE & STYLE RULES:
 - Use “Mai” for “I” and “Tum” for “You”.
@@ -125,6 +130,91 @@ class GeminiKeyManager:
             )
         else:
             console.print(f"[bold red]❌ All {len(self.keys)} API Keys have been exhausted![/bold red]")
+
+DEV_VOWELS = {
+    'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo', 'ऋ': 'ri',
+    'ए': 'e', 'ऐ': 'ai', 'ओ': 'o', 'औ': 'au', 'अं': 'an', 'अः': 'ah'
+}
+
+DEV_MATRAS = {
+    'ा': 'aa', 'ि': 'i', 'ी': 'ee', 'ु': 'u', 'ू': 'oo', 'ृ': 'ri',
+    'े': 'e', 'ै': 'ai', 'ो': 'o', 'ौ': 'au', 'ं': 'n', 'ँ': 'n', 'ः': 'h'
+}
+
+DEV_CONSONANTS = {
+    'क': 'k', 'ख': 'kh', 'ग': 'g', 'घ': 'gh', 'ङ': 'ng',
+    'च': 'ch', 'छ': 'chh', 'ज': 'j', 'झ': 'jh', 'ञ': 'ny',
+    'ट': 't', 'ठ': 'th', 'ड': 'd', 'ढ': 'dh', 'ण': 'n',
+    'त': 't', 'थ': 'th', 'द': 'd', 'ध': 'dh', 'न': 'n',
+    'प': 'p', 'फ': 'f', 'ब': 'b', 'भ': 'bh', 'म': 'm',
+    'य': 'y', 'र': 'r', 'ल': 'l', 'व': 'v', 'श': 'sh', 'ष': 'sh', 'स': 's', 'ह': 'h',
+    'क़': 'q', 'ख़': 'kh', 'ग़': 'g', 'ज़': 'z', 'फ़': 'f', 'ड़': 'd', 'ढ़': 'dh'
+}
+
+def sanitize_devanagari_to_roman(text: str) -> str:
+    """
+    100% fail-safe: Converts any Devanagari (Hindi) script into Roman Hinglish.
+    Ensures zero Devanagari characters ever enter the subtitle file.
+    """
+    if not re.search(r'[\u0900-\u097F]', text):
+        return text
+
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        c = text[i]
+
+        two = text[i:i+2]
+        if two in DEV_CONSONANTS:
+            cons = DEV_CONSONANTS[two]
+            i += 2
+            if i < n and text[i] == '्':
+                out.append(cons)
+                i += 1
+            elif i < n and text[i] in DEV_MATRAS:
+                out.append(cons + DEV_MATRAS[text[i]])
+                i += 1
+            else:
+                next_is_terminal = (i >= n or text[i] in ' \t\n.,!?;:\'\"')
+                out.append(cons if next_is_terminal else cons + 'a')
+            continue
+
+        if c in DEV_CONSONANTS:
+            cons = DEV_CONSONANTS[c]
+            i += 1
+            if i < n and text[i] == '्':
+                out.append(cons)
+                i += 1
+            elif i < n and text[i] in DEV_MATRAS:
+                out.append(cons + DEV_MATRAS[text[i]])
+                i += 1
+            else:
+                next_is_terminal = (i >= n or text[i] in ' \t\n.,!?;:\'\"')
+                out.append(cons if next_is_terminal else cons + 'a')
+            continue
+
+        if c in DEV_VOWELS:
+            out.append(DEV_VOWELS[c])
+            i += 1
+            continue
+
+        if c in DEV_MATRAS:
+            out.append(DEV_MATRAS[c])
+            i += 1
+            continue
+
+        if c == '।':
+            out.append('.')
+            i += 1
+            continue
+
+        if ord(c) < 0x0900 or ord(c) > 0x097F:
+            out.append(c)
+        i += 1
+
+    result = ''.join(out)
+    return re.sub(r'[\u0900-\u097F]', '', result)
 
 def clean_sub_text(text: str) -> str:
     """Removes existing ASS/HTML formatting tags from text."""
@@ -311,7 +401,8 @@ def translate_subtitles_to_hinglish(
     for batch in track(batches, description="[green]Translating batches..."):
         translated_results = translate_batch_with_retry(batch, key_manager)
         for item in translated_results:
-            translations_map[item["id"]] = item["text"]
+            clean_text = sanitize_devanagari_to_roman(item.get("text", ""))
+            translations_map[item["id"]] = clean_text
         # Small delay between requests to be gentle on rate limits
         time.sleep(0.4)
 

@@ -25,6 +25,34 @@ STYLES_HD = [
     "Style: WatermarkTop,Montserrat SemiBold,16,&H00B8FFC8,&H00B8FFC8,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,0,0.0,1.0,9,30,14,6,1"
 ]
 
+def get_info_events(target_rx: int, target_ry: int) -> List[str]:
+    """Returns custom Info dialogue lines (placed directly above WatermarkTop dialogues)."""
+    if target_rx == 1280 and target_ry == 720:
+        return [
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(650,60)\fs45}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(650,110)\fs42}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+        ]
+    elif target_rx == 1920 and target_ry == 1080:
+        return [
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(975,90)\fs68}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(975,165)\fs63}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+        ]
+    elif target_rx == 640 and target_ry == 360:
+        return [
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,30)\fs23}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,55)\fs21}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+        ]
+    elif target_rx == 384 and target_ry == 288:
+        return [
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(192,24)\fs18}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(192,44)\fs17}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+        ]
+    else:
+        return [
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(650,60)\fs45}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(650,110)\fs42}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+        ]
+
 def get_watermark_events(pos_x: int, pos_y: int, fs: int) -> List[str]:
     return [
         f"Dialogue: 0,0:00:00.00,0:07:10.10,WatermarkTop,,0,0,0,,{{\\fad(2000,500)\\fnComic Sans MS\\c&H307DEE&\\3c&HFFFFFF&\\fs{fs}\\pos({pos_x},{pos_y})}}Dark{{\\c&H56DDB5&}}Soul{{\\c&H215BEC&}}Academy😉",
@@ -317,15 +345,19 @@ def inject_watermark_into_file(file_path: Path):
             if line.strip().startswith("Dialogue:"):
                 last_dialogue_idx = i
 
+        info_events = get_info_events(target_rx, target_ry)
         wm_events = get_watermark_events(pos_x, pos_y, fs)
+        # Info dialogues are placed directly above WatermarkTop dialogues
+        all_custom_events = info_events + wm_events
+
         if last_dialogue_idx != -1:
             # Leave a blank line (2 lines below)
-            insert_events = [""] + wm_events
+            insert_events = [""] + all_custom_events
             for ev in reversed(insert_events):
                 lines.insert(last_dialogue_idx + 1, ev)
         else:
             lines.append("")
-            lines.extend(wm_events)
+            lines.extend(all_custom_events)
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")

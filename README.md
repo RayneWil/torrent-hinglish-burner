@@ -19,6 +19,11 @@ Just paste this **one single command** into your terminal (Termux, Ubuntu, or VP
 curl -sSL https://raw.githubusercontent.com/RayneWil/torrent-hinglish-burner/main/install.sh | bash
 ```
 
+> **Tip:** You only need to run the `curl` command once during setup! After that, you can launch DSA Subber anytime from anywhere simply by typing:
+> ```bash
+> dsa
+> ```
+
 ---
 
 ## 📱 Interactive Terminal UI (`DSA Subber Ready`)

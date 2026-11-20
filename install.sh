@@ -49,7 +49,7 @@ else
 fi
 
 # 3. Install Lightweight Python Requirements
-echo "🐍 Installing Python packages (pysubs2, rich)..."
+echo "🐍 Installing Python packages (pysubs2, rich, telethon)..."
 pip install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
 pip install -r requirements.txt --quiet 2>/dev/null || \
 pip3 install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \

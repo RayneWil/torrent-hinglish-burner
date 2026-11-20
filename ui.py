@@ -168,6 +168,15 @@ def start_burning_workflow(quality: str):
         final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{quality}.mp4"
         shutil.move(str(temp_encoded_video), str(final_video_destination))
 
+        # Step 7: Auto-Upload to Telegram Channel
+        if config.TELEGRAM_AUTO_UPLOAD:
+            console.rule("[bold cyan]Step 6: Uploading to Telegram Channel[/bold cyan]")
+            try:
+                from telegram_uploader import upload_to_telegram
+                upload_to_telegram(final_video_destination, final_sub_destination, quality=quality)
+            except Exception as e:
+                console.print(f"[bold red]⚠️ Telegram upload skipped due to error: {e}[/bold red]")
+
         # Completion Success Banner
         show_header()
         console.print(Panel(
@@ -194,11 +203,90 @@ def start_burning_workflow(quality: str):
     except (EOFError, KeyboardInterrupt):
         pass
 
+def test_telegram_connection():
+    """Tests the Telegram Bot connection and sends a test message to the channel."""
+    console.print("\n[bold cyan]✈️ Testing Telegram Bot connection...[/bold cyan]")
+    try:
+        from telegram_uploader import ensure_telethon_installed
+        ensure_telethon_installed()
+        from telethon import TelegramClient
+
+        async def _test():
+            session_path = str(config.TEMP_DIR / "dsa_test_session")
+            client = TelegramClient(session_path, config.TELEGRAM_API_ID, config.TELEGRAM_API_HASH)
+            try:
+                await client.start(bot_token=config.TELEGRAM_BOT_TOKEN)
+                me = await client.get_me()
+                console.print(f"[bold green]✅ Bot connected successfully as: @{me.username} ({me.first_name})![/bold green]")
+                console.print(f"[dim]Sending test message to channel {config.TELEGRAM_CHAT_ID}...[/dim]")
+                msg = await client.send_message(
+                    config.TELEGRAM_CHAT_ID,
+                    "🤖 <b>DSA Subber Connected!</b>\n\nTelegram Auto-Uploader is ready! 🚀\n<i>Channel: @DarkSoulAcademy</i>",
+                    parse_mode="html"
+                )
+                console.print(f"[bold green]🎉 Test message delivered successfully to your channel (Message ID: {msg.id})![/bold green]")
+            except Exception as err:
+                console.print(f"[bold red]❌ Telegram connection failed: {err}[/bold red]")
+                console.print("[yellow]💡 Note: Ensure your bot is added as an Administrator with 'Post Messages' permission in your channel![/yellow]")
+            finally:
+                await client.disconnect()
+
+        import asyncio
+        asyncio.run(_test())
+    except Exception as e:
+        console.print(f"[bold red]❌ Error: {e}[/bold red]")
+
+    try:
+        Prompt.ask("\n[bold yellow]Press Enter to return...[/bold yellow]")
+    except (EOFError, KeyboardInterrupt):
+        pass
+
+def manage_telegram_settings():
+    """Sub-menu to configure Telegram auto-upload."""
+    while True:
+        show_header()
+        status_text = "[bold green]ENABLED (Auto-upload ON)[/bold green]" if config.TELEGRAM_AUTO_UPLOAD else "[bold red]DISABLED (Auto-upload OFF)[/bold red]"
+        console.print(Panel(
+            f"[bold white]✈️ Telegram Auto-Uploader Configuration[/bold white]\n\n"
+            f"• [bold]Auto-Upload Status:[/bold] {status_text}\n"
+            f"• [bold]Target Channel/Chat ID:[/bold] [bold cyan]{config.TELEGRAM_CHAT_ID}[/bold cyan]\n"
+            f"• [bold]Upload .ass Subtitle:[/bold] [bold cyan]{'Yes' if config.TELEGRAM_UPLOAD_SUBTITLE else 'No'}[/bold cyan]\n"
+            f"• [bold]Engine:[/bold] [bold green]Telethon MTProto (Supports up to 2 GB)[/bold green]\n\n"
+            "[bold cyan][1][/bold cyan] 🔄 [bold]Toggle Auto-Upload (ON / OFF)[/bold]\n"
+            "[bold cyan][2][/bold cyan] 📢 [bold]Change Target Channel / Chat ID[/bold]\n"
+            "[bold cyan][3][/bold cyan] 🧪 [bold]Test Bot Connection & Send Test Message[/bold]\n"
+            "[bold cyan][4][/bold cyan] ↩️ [bold]Back to Main Menu[/bold]",
+            title="[bold magenta]Telegram Settings[/bold magenta]",
+            border_style="magenta"
+        ))
+
+        try:
+            choice = Prompt.ask("[bold cyan]Enter choice (1-4)[/bold cyan]", choices=["1", "2", "3", "4"], default="4")
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if choice == "1":
+            config.TELEGRAM_AUTO_UPLOAD = not config.TELEGRAM_AUTO_UPLOAD
+            console.print(f"\n[bold green]✅ Telegram Auto-Upload is now {'ENABLED' if config.TELEGRAM_AUTO_UPLOAD else 'DISABLED'}![/bold green]")
+            time.sleep(1.5)
+        elif choice == "2":
+            new_id = Prompt.ask("\n[bold yellow]Enter new Channel ID (e.g. -1003511011855) or @username[/bold yellow]")
+            if new_id.strip():
+                clean_val = new_id.strip()
+                config.TELEGRAM_CHAT_ID = int(clean_val) if clean_val.lstrip("-").isdigit() else clean_val
+                console.print(f"[bold green]✅ Channel ID updated to: {config.TELEGRAM_CHAT_ID}[/bold green]")
+                time.sleep(1.5)
+        elif choice == "3":
+            test_telegram_connection()
+        elif choice == "4":
+            break
+
 def main_menu():
     quality = "720p"
 
     while True:
         show_header()
+        tg_badge = "[bold green]ON[/bold green]" if config.TELEGRAM_AUTO_UPLOAD else "[bold red]OFF[/bold red]"
         console.print(Panel(
             "[bold white]Select an option:[/bold white]\n\n"
             "[bold green][1][/bold green] 🔥 [bold]Start Burning[/bold]\n"
@@ -207,13 +295,14 @@ def main_menu():
             f"[bold blue][4][/bold blue] 📂 [bold]View Anime Burn Folders[/bold]\n"
             "       ├── [dim]Video:    " + str(config.VIDEO_OUTPUT_DIR) + "[/dim]\n"
             "       └── [dim]Subtitle: " + str(config.SUBTITLE_OUTPUT_DIR) + "[/dim]\n"
-            "[bold red][5][/bold red] 🚪 [bold]Exit[/bold]",
+            f"[bold magenta][5][/bold magenta] ✈️ [bold]Telegram Settings / Test Upload[/bold] ({tg_badge})\n"
+            "[bold red][6][/bold red] 🚪 [bold]Exit[/bold]",
             title="[bold cyan]Main Menu[/bold cyan]",
             border_style="cyan"
         ))
 
         try:
-            choice = Prompt.ask("[bold cyan]Enter choice (1-5)[/bold cyan]", choices=["1", "2", "3", "4", "5"], default="1")
+            choice = Prompt.ask("[bold cyan]Enter choice (1-6)[/bold cyan]", choices=["1", "2", "3", "4", "5", "6"], default="1")
         except (EOFError, KeyboardInterrupt):
             console.print("\n\n[bold yellow]Exiting... Bye![/bold yellow]")
             sys.exit(0)
@@ -229,6 +318,8 @@ def main_menu():
             console.print(f"[bold cyan]📝 Subtitle Folder: {config.SUBTITLE_OUTPUT_DIR}[/bold cyan]\n")
             time.sleep(3)
         elif choice == "5":
+            manage_telegram_settings()
+        elif choice == "6":
             console.print("\n[bold yellow]👋 Exiting DSA Subber. Bye bhai![/bold yellow]\n")
             sys.exit(0)
 

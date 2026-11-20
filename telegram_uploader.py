@@ -10,7 +10,7 @@ import urllib.request
 import urllib.error
 import urllib.parse
 from pathlib import Path
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, List
 
 try:
     from rich.console import Console
@@ -249,28 +249,62 @@ def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
 
     return clean_anime_title_name(raw_title) or Path(filename).stem, season, episode
 
+def extract_year_from_filename(filename: str) -> str:
+    """Extracts 4-digit release/broadcast year e.g. (2024), [2023] from filename."""
+    m = re.search(r'[\(\[](\d{4})[\)\]]', filename)
+    if m:
+        val = int(m.group(1))
+        if 1960 <= val <= 2035:
+            return str(val)
+    return ""
+
+def get_ordinal(n: int) -> str:
+    """Returns ordinal string e.g. 1st, 2nd, 3rd, 4th."""
+    if 11 <= (n % 100) <= 13:
+        return f"{n}th"
+    rem = n % 10
+    if rem == 1:
+        return f"{n}st"
+    elif rem == 2:
+        return f"{n}nd"
+    elif rem == 3:
+        return f"{n}rd"
+    return f"{n}th"
+
+def clean_caption_title(title: str) -> str:
+    """Removes redundant trailing season numbers or suffixes so caption title stays clean."""
+    t = title.strip()
+    t = re.sub(r'[\s\-_]+(?:Season\s*\d+|\d+(?:st|nd|rd|th)\s+Season|S\d+)\b', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'[\s\-:.]+$', '', t).strip()
+    return t
+
 ANILIST_GRAPHQL_QUERY = """
 query ($search: String) {
-  Media (search: $search, type: ANIME) {
-    id
-    title {
-      english
-      romaji
+  Page(page: 1, perPage: 25) {
+    media(search: $search, type: ANIME) {
+      id
+      title {
+        english
+        romaji
+        userPreferred
+      }
+      coverImage {
+        extraLarge
+        large
+      }
+      format
+      seasonYear
+      startDate { year }
+      genres
     }
-    coverImage {
-      extraLarge
-      large
-    }
-    genres
   }
 }
 """
 
-def fetch_from_anilist(title: str) -> Dict:
-    """Queries AniList GraphQL API (100% keyless, public)."""
+def fetch_anilist_candidates(search_query: str) -> List[Dict]:
+    """Queries AniList GraphQL API returning candidate media list."""
     url = "https://graphql.anilist.co"
-    variables = {"search": title}
-    data = json.dumps({"query": ANILIST_GRAPHQL_QUERY, "variables": variables}).encode("utf-8")
+    data = json.dumps({"query": ANILIST_GRAPHQL_QUERY, "variables": {"search": search_query}}).encode("utf-8")
     req = urllib.request.Request(
         url,
         data=data,
@@ -281,11 +315,96 @@ def fetch_from_anilist(title: str) -> Dict:
         }
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=10) as resp:
             res = json.loads(resp.read().decode("utf-8"))
-            return res.get("data", {}).get("Media", {}) or {}
+            return res.get("data", {}).get("Page", {}).get("media", []) or []
     except Exception:
-        return {}
+        return []
+
+def fetch_from_anilist(title: str) -> Dict:
+    """Queries AniList GraphQL API (backwards compatibility)."""
+    cands = fetch_anilist_candidates(title)
+    return cands[0] if cands else {}
+
+def score_candidate(candidate: dict, base_title: str, target_season: int, year: str = "") -> float:
+    """
+    Intelligently scores an AniList candidate based on:
+    - Exact season match (+60) vs wrong season penalty (-50)
+    - Year match (+40) vs huge historical gap penalty (-30)
+    - Format match: TV (+25), ONA (+15) vs MOVIE/OVA/SPECIAL (-25)
+    - Title word overlap (+25)
+    """
+    score = 0.0
+    titles = [
+        candidate.get("title", {}).get("english") or "",
+        candidate.get("title", {}).get("romaji") or "",
+        candidate.get("title", {}).get("userPreferred") or ""
+    ]
+    combined_titles = " ".join(titles).lower()
+
+    # 1. Season matching
+    ord_str = get_ordinal(target_season).lower() # e.g. "3rd"
+    roman_map = {1: "I", 2: "II", 3: "III", 4: "IV", 5: "V", 6: "VI", 7: "VII", 8: "VIII", 9: "IX", 10: "X"}
+    roman = roman_map.get(target_season, "").lower()
+
+    season_keywords = [
+        f"season {target_season}",
+        f"season{target_season}",
+        f"s{target_season:02d}",
+        f"s{target_season}",
+        f"{ord_str} season",
+        f"{ord_str}"
+    ]
+    if roman:
+        season_keywords.append(f" {roman} ")
+        season_keywords.append(f" {roman}:")
+
+    has_target_season = any(re.search(rf"\b{re.escape(kw.strip())}\b", combined_titles) for kw in season_keywords)
+
+    if target_season > 1:
+        if has_target_season:
+            score += 60.0
+        else:
+            for other_s in range(1, 15):
+                if other_s != target_season:
+                    other_ord = get_ordinal(other_s).lower()
+                    if f"season {other_s}" in combined_titles or f"{other_ord} season" in combined_titles:
+                        score -= 50.0
+    else:
+        for other_s in range(2, 15):
+            other_ord = get_ordinal(other_s).lower()
+            if f"season {other_s}" in combined_titles or f"{other_ord} season" in combined_titles:
+                score -= 60.0
+        if "season 1" in combined_titles or "1st season" in combined_titles:
+            score += 20.0
+
+    # 2. Year matching
+    cand_year = str(candidate.get("seasonYear") or (candidate.get("startDate") or {}).get("year") or "")
+    if year:
+        if year in combined_titles or cand_year == year:
+            score += 40.0
+        elif cand_year:
+            gap = abs(int(cand_year) - int(year))
+            if gap <= 1:
+                score += 15.0
+            elif gap > 4:
+                score -= 30.0
+
+    # 3. Format matching (TV episodes preferred over movies/music/specials)
+    fmt = (candidate.get("format") or "").upper()
+    if fmt == "TV":
+        score += 25.0
+    elif fmt in ("ONA", "TV_SHORT"):
+        score += 15.0
+    elif fmt in ("MOVIE", "OVA", "SPECIAL", "MUSIC"):
+        score -= 25.0
+
+    # 4. Title similarity
+    clean_base = re.sub(r"[^\w\s]", " ", base_title.lower()).split()
+    matched_words = sum(1 for w in clean_base if w in combined_titles)
+    score += (matched_words / max(1, len(clean_base))) * 25.0
+
+    return score
 
 def fetch_anime_metadata_and_poster(
     filename: str,
@@ -295,54 +414,93 @@ def fetch_anime_metadata_and_poster(
     """
     Identifies anime English title, Season, Episode, Genres, and downloads
     official HD Anime Poster thumbnail matching the exact season.
+    Uses intelligent multi-candidate scoring on AniList.
     Order of operations:
-      1. Search AniList first for official English Title.
-      2. For thumbnail: search exact season on AniList (e.g. 'Title Season 2').
-      3. Fallback to TMDB if AniList doesn't find title or season poster.
+      1. Multi-candidate AniList search ranking by Season, Year, Format (TV), Title overlap.
+      2. Exact Season poster selection for video thumbnail.
+      3. Fallback to TMDB if AniList doesn't yield title or season poster.
     """
     clean_title, season, episode = parse_anime_info_from_filename(filename)
+    year = extract_year_from_filename(filename)
     english_title = clean_title
     genres = "Animation, Anime"
     poster_url = None
 
-    console.print(f"[bold cyan]🔍 Parsed Filename: Title='{clean_title}', Season={season:02d}, Episode={episode:02d}[/bold cyan]")
+    console.print(f"[bold cyan]🔍 Parsed Filename: Title='{clean_title}', Season={season:02d}, Episode={episode:02d}, Year='{year}'[/bold cyan]")
 
-    # Step 1: Query AniList FIRST (Keyless, comprehensive anime database)
-    base_ani = None
-    try:
-        base_ani = fetch_from_anilist(clean_title)
-        if not base_ani and "_" in clean_title:
-            base_ani = fetch_from_anilist(clean_title.replace("_", " "))
-        if base_ani:
-            found_eng = base_ani.get("title", {}).get("english")
-            found_romaji = base_ani.get("title", {}).get("romaji")
-            english_title = found_eng or found_romaji or english_title
-            g_list = base_ani.get("genres", [])
+    # Step 1: Query AniList with multiple variations to build a candidate pool
+    norm_title = clean_title.replace("_", " ").strip()
+    slash_title = clean_title.replace("_", "/").strip()
+    ord_str = get_ordinal(season)
+
+    search_queries = []
+    if season > 1:
+        if year:
+            search_queries.append(f"{norm_title} ({year}) {ord_str} Season")
+            search_queries.append(f"{norm_title} {ord_str} Season")
+            search_queries.append(f"{norm_title} Season {season}")
+            search_queries.append(f"{slash_title} {ord_str} Season")
+        else:
+            search_queries.append(f"{norm_title} {ord_str} Season")
+            search_queries.append(f"{norm_title} Season {season}")
+            search_queries.append(f"{slash_title} Season {season}")
+
+    if year:
+        search_queries.append(f"{norm_title} {year}")
+        if slash_title != norm_title:
+            search_queries.append(f"{slash_title} {year}")
+
+    search_queries.append(norm_title)
+    if slash_title != norm_title:
+        search_queries.append(slash_title)
+
+    candidates_by_id = {}
+    for q in search_queries:
+        if not q:
+            continue
+        cands = fetch_anilist_candidates(q)
+        for c in cands:
+            candidates_by_id[c["id"]] = c
+        if len(candidates_by_id) >= 20:
+            break
+
+    best_candidate = None
+    if candidates_by_id:
+        # Score candidates for target season poster
+        scored = []
+        for cid, c in candidates_by_id.items():
+            s = score_candidate(c, norm_title, season, year)
+            scored.append((s, c))
+        scored.sort(key=lambda x: x[0], reverse=True)
+
+        if scored and scored[0][0] > 0:
+            best_score, best_candidate = scored[0]
+            c_name = best_candidate.get("title", {}).get("romaji") or best_candidate.get("title", {}).get("english")
+            console.print(f"[bold green]✨ Best AniList Poster Match (Score: {best_score:.1f}): ID={best_candidate['id']}, Title='{c_name}'[/bold green]")
+            cover = best_candidate.get("coverImage", {})
+            poster_url = cover.get("extraLarge") or cover.get("large")
+            g_list = best_candidate.get("genres", [])
             if g_list:
                 genres = ", ".join(g_list[:3])
-            console.print(f"[bold green]✨ AniList Match: English Title = '{english_title}'[/bold green]")
-    except Exception as e:
-        console.print(f"[dim]⚠️ AniList query notice: {e}[/dim]")
 
-    # Step 2: Fetch exact Season Poster from AniList
-    if season > 1:
-        try:
-            # Query AniList for season specific entry e.g. "Tantei wa Mou Shindeiru Season 2"
-            season_ani = fetch_from_anilist(f"{clean_title} Season {season}")
-            if not season_ani and english_title != clean_title:
-                season_ani = fetch_from_anilist(f"{english_title} Season {season}")
-            if season_ani:
-                cover = season_ani.get("coverImage", {})
-                poster_url = cover.get("extraLarge") or cover.get("large")
-                if poster_url:
-                    console.print(f"[bold green]🖼️ Found Season {season:02d} specific poster on AniList![/bold green]")
-        except Exception:
-            pass
+        # Find base title for caption (English title of main franchise / Season 1)
+        base_title_candidate = None
+        s1_scored = []
+        for cid, c in candidates_by_id.items():
+            s1_s = score_candidate(c, norm_title, target_season=1, year="")
+            s1_scored.append((s1_s, c))
+        s1_scored.sort(key=lambda x: x[0], reverse=True)
+        if s1_scored and s1_scored[0][0] > 0:
+            base_title_candidate = s1_scored[0][1]
 
-    # If season 1 or season-specific AniList poster not found, use base AniList cover
-    if not poster_url and base_ani:
-        cover = base_ani.get("coverImage", {})
-        poster_url = cover.get("extraLarge") or cover.get("large")
+        target_title_cand = base_title_candidate or best_candidate
+        if target_title_cand:
+            found_eng = (target_title_cand.get("title", {}) or {}).get("english")
+            found_rom = (target_title_cand.get("title", {}) or {}).get("romaji")
+            found_usr = (target_title_cand.get("title", {}) or {}).get("userPreferred")
+            chosen_raw = found_eng or found_rom or found_usr or clean_title
+            english_title = clean_caption_title(chosen_raw)
+            console.print(f"[bold green]✨ AniList English Caption Title: '{english_title}'[/bold green]")
 
     # Step 3: Fallback to TMDB if AniList didn't provide English title or poster
     if (not english_title or english_title == clean_title or not poster_url) and tmdb_api_key:

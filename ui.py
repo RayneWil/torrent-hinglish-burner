@@ -305,6 +305,12 @@ def manage_telegram_settings():
             break
 
 def main_menu():
+    try:
+        from notifier import notifier
+        notifier.notify_service_start(cmd_args=sys.argv[1:])
+    except Exception:
+        pass
+
     quality = "720p"
 
     while True:

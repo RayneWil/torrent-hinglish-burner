@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 from rich.console import Console
 from rich.progress import track
 import pysubs2
+from notifier import notifier
 
 console = Console()
 
@@ -547,6 +548,7 @@ def translate_subtitles_to_hinglish(
     if not key_manager.has_keys:
         console.print("[bold red]❌ No valid Gemini API Keys provided![/bold red]")
         console.print("Please provide API keys in .env (GEMINI_API_KEYS=key1,key2,...) or via CLI.")
+        notifier.notify_error("Translation", "No valid Gemini API keys found in .env")
         return subs
 
     console.print(f"[bold cyan]🔑 Loaded {key_manager.total_keys} Gemini API Key(s) into Rotation Pool[/bold cyan]")
@@ -593,6 +595,7 @@ def translate_subtitles_to_hinglish(
 
     total_lines = len(dialogues_to_translate)
     console.print(f"[bold cyan]🌐 Translating {total_lines} subtitle lines to Hinglish in batches of {batch_size}...[/bold cyan]")
+    notifier.start_translation(total_lines)
 
     # Extract episode character roster to enforce accurate gender conjugations
     console.print("[bold cyan]🔍 Profiling episode characters and genders for high accuracy...[/bold cyan]")
@@ -608,7 +611,7 @@ def translate_subtitles_to_hinglish(
 
     translations_map = {}
     prev_context_lines = []
-    for batch in track(batches, description="[green]Translating batches with gender tracking..."):
+    for batch_idx, batch in enumerate(track(batches, description="[green]Translating batches with gender tracking...")):
         translated_results = translate_batch_with_retry(
             batch,
             key_manager,
@@ -624,6 +627,12 @@ def translate_subtitles_to_hinglish(
             else:
                 prev_context_lines.append(clean_text)
         prev_context_lines = prev_context_lines[-6:]
+        notifier.update_translation_progress(
+            done_lines=len(translations_map),
+            total_lines=total_lines,
+            current_batch=batch_idx + 1,
+            total_batches=len(batches)
+        )
         # Pacing between batches to protect against 15 RPM rate limits
         time.sleep(1.2)
 
@@ -634,6 +643,7 @@ def translate_subtitles_to_hinglish(
         if not untranslated_items or not key_manager.has_keys:
             break
         console.print(f"[bold yellow]🔍 Fail-Safe Pass {sweeper_pass}: Translating {len(untranslated_items)} remaining line(s)...[/bold yellow]")
+        notifier.update_translation_fail_safe(pass_num=sweeper_pass, remaining=len(untranslated_items))
         batch_sz = 10 if sweeper_pass == 1 else 5
         recover_batches = [
             untranslated_items[i:i + batch_sz]
@@ -651,6 +661,7 @@ def translate_subtitles_to_hinglish(
     still_missing = [item for item in dialogues_to_translate if item["id"] not in translations_map]
     if still_missing and key_manager.has_keys:
         console.print(f"[bold yellow]🔍 Final Micro-Pass: Translating {len(still_missing)} line(s) individually...[/bold yellow]")
+        notifier.update_translation_fail_safe(pass_num=4, remaining=len(still_missing))
         for single_item in still_missing:
             res = translate_batch_with_retry([single_item], key_manager, roster=character_roster)
             for it in res:
@@ -672,4 +683,5 @@ def translate_subtitles_to_hinglish(
 
     translated_count = len(translations_map)
     console.print(f"[bold green]✅ Translation Completed: {translated_count}/{total_lines} lines translated to natural Hinglish![/bold green]")
+    notifier.finish_translation(translated_count, total_lines)
     return subs

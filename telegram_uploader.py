@@ -12,20 +12,30 @@ import urllib.parse
 from pathlib import Path
 from typing import Optional, Dict, Tuple
 
-from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    DownloadColumn,
-    TransferSpeedColumn,
-    TimeRemainingColumn
-)
+try:
+    from rich.console import Console
+    from rich.progress import (
+        Progress,
+        SpinnerColumn,
+        TextColumn,
+        BarColumn,
+        DownloadColumn,
+        TransferSpeedColumn,
+        TimeRemainingColumn
+    )
+    console = Console()
+except ImportError:
+    class DummyConsole:
+        def print(self, *args, **kwargs):
+            import re
+            clean = " ".join(str(a) for a in args)
+            clean = re.sub(r"\[.*?\]", "", clean)
+            print(clean)
+    console = DummyConsole()
+    Progress = None
+    SpinnerColumn = TextColumn = BarColumn = DownloadColumn = TransferSpeedColumn = TimeRemainingColumn = None
 
 import config
-
-console = Console()
 
 def ensure_telethon_installed():
     """Silently ensures telethon is installed."""
@@ -110,57 +120,99 @@ def format_duration(seconds: int) -> str:
         return f"{hours}h {mins:02d}m {secs:02d}s"
     return f"{mins:02d}m {secs:02d}s"
 
+ROMAN_NUMERALS = {
+    "I": 1, "II": 2, "III": 3, "IV": 4, "V": 5,
+    "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10
+}
+
 def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
     """
-    Extracts (clean_title, season, episode) from typical anime filenames.
-    e.g. '[SubsPlease] Sousou no Frieren - 08 (720p)_Hinglish_720p.mp4' -> ('Sousou no Frieren', 1, 8)
-         '[Erai-raws] FX Fighter Kurumi-chan - 08 [720p].mkv' -> ('FX Fighter Kurumi-chan', 1, 8)
-         'Jujutsu Kaisen S02E14 [1080p].mkv' -> ('Jujutsu Kaisen', 2, 14)
+    Accurately extracts (clean_title, season, episode) from typical anime filenames.
+    Supports all standard release group patterns:
+      '[Erai-raws] Tantei wa Mou Shindeiru Season 2 - 01 [...]' -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru 02 - 01 [...]'       -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru II - 01 [...]'       -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru 01 [...]'            -> ('Tantei wa Mou Shindeiru', 1, 1)
+      '[Erai-raws] Ranma 1_2 (2024) 3rd Season - 01 [...]'      -> ('Ranma 1_2 (2024)', 3, 1)
+      '[SubsPlease] Bleach - S03E05 (1080p) [...]'              -> ('Bleach', 3, 5)
     """
     name = Path(filename).stem
     # Remove _Hinglish and anything after it (like _720p, _480p)
     name = re.sub(r"_Hinglish.*$", "", name, flags=re.IGNORECASE)
-    # Remove release group [Group]
+    # Remove leading release group [Group]
     name = re.sub(r"^\[.*?\]\s*", "", name)
-    # Remove any brackets containing resolution/codec like [720p][AAC]
-    name = re.sub(r"\[.*?\]", "", name)
-    # Remove parentheses containing resolution like (720p)
-    name = re.sub(r"\(.*?\)", "", name)
+
+    # Strip all trailing bracket tags from the right (e.g. [720p CR WEB-DL AVC AAC], [MultiSub], [08E85F11])
+    while True:
+        m = re.search(r"\s*\[[^\]]*\]$", name)
+        if m:
+            name = name[:m.start()]
+        else:
+            break
+
+    # Strip trailing parenthesis tags like (1080p), (720p)
+    while True:
+        m = re.search(r"\s*\(\d{3,4}p[^\)]*\)$", name, re.IGNORECASE)
+        if m:
+            name = name[:m.start()]
+        else:
+            break
+
     name = name.strip()
 
     season = 1
     episode = 1
+    clean_title = name
 
-    # Check for S01E08, S1E8, S01 - E08, etc.
-    s_e_match = re.search(r"[Ss](\d+)\s*[-_ ]*[Ee](\d+)", name)
-    if s_e_match:
-        season = int(s_e_match.group(1))
-        episode = int(s_e_match.group(2))
-        clean_name = name[:s_e_match.start()]
+    # Pattern 1: Check for S01E08, S1E8, S02 - E01, etc.
+    s_e = re.search(r"\b[Ss](\d+)\s*[-_ ]*[Ee](\d+)\b", name)
+    if s_e:
+        season = int(s_e.group(1))
+        episode = int(s_e.group(2))
+        clean_title = name[:s_e.start()].strip(" -_.")
+        return clean_title or name, season, episode
+
+    # Pattern 2: Check for explicit Season word: Season 2 - 01, 3rd Season - 01, 2nd Season - 06, S2 - 14
+    s_word = re.search(r"\b(?:(\d+)(?:st|nd|rd|th)\s+Season|(?:Season|S)\s*(\d+))\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name, re.IGNORECASE)
+    if s_word:
+        s_num = s_word.group(1) or s_word.group(2)
+        season = int(s_num)
+        episode = int(s_word.group(3))
+        clean_title = name[:s_word.start()].strip(" -_.")
+        return clean_title or name, season, episode
+
+    # Pattern 3: Check for Roman numerals before episode: Title II - 01, Title III - 01
+    roman_m = re.search(r"\b(I|II|III|IV|V|VI|VII|VIII|IX|X)\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name)
+    if roman_m:
+        season = ROMAN_NUMERALS.get(roman_m.group(1), 1)
+        episode = int(roman_m.group(2))
+        clean_title = name[:roman_m.start()].strip(" -_.")
+        return clean_title or name, season, episode
+
+    # Pattern 4: Check for Season Number - Episode Number: Title 02 - 01
+    two_nums = re.search(r"\b(\d{1,2})\s*-\s*(\d{1,4})\b$", name)
+    if two_nums:
+        season = int(two_nums.group(1))
+        episode = int(two_nums.group(2))
+        clean_title = name[:two_nums.start()].strip(" -_.")
+        return clean_title or name, season, episode
+
+    # Pattern 5: Check for standalone Season mention: Title Season 2
+    s_only = re.search(r"\b(?:(\d+)(?:st|nd|rd|th)\s+Season|(?:Season|S)\s*(\d+))\b", name, re.IGNORECASE)
+    if s_only:
+        s_num = s_only.group(1) or s_only.group(2)
+        season = int(s_num)
+        name = (name[:s_only.start()] + name[s_only.end():]).strip(" -_.")
+
+    # Pattern 6: Check for single Episode at the end: Title - 08 or Title 01
+    ep_only = re.search(r"(?:[-_ ]+(?:EP|Ep|Episode)?\s*|^)(\d{1,4})(?:\s*v\d+)?$", name)
+    if ep_only:
+        episode = int(ep_only.group(1))
+        clean_title = name[:ep_only.start()].strip(" -_.")
     else:
-        # Check for Season 2, S2
-        s_match = re.search(r"(?:Season|S)\s*(\d+)", name, re.IGNORECASE)
-        if s_match:
-            season = int(s_match.group(1))
-            name = name[:s_match.start()] + name[s_match.end():]
+        clean_title = name.strip(" -_.")
 
-        # Check for episode number e.g. - 08, EP08, Ep 8, or trailing digits
-        ep_match = re.search(r"(?:[-_ ]+(?:EP|Ep|Episode)?\s*|^)(\d{1,4})(?:\s*v\d+)?(?:\s*[-_ ]|$)", name)
-        if ep_match:
-            episode = int(ep_match.group(1))
-            clean_name = name[:ep_match.start()] + name[ep_match.end():]
-        else:
-            # Fallback regex for any number after a dash
-            dash_ep = re.search(r"[-_ ]+(\d{1,4})(?:\s*v\d+)?(?:\s|$)", name)
-            if dash_ep:
-                episode = int(dash_ep.group(1))
-                clean_name = name[:dash_ep.start()]
-            else:
-                clean_name = name
-
-    # Clean up trailing dashes/spaces
-    clean_name = re.sub(r"[-_ ]+$", "", clean_name).strip(" -_.")
-    return clean_name or Path(filename).stem, season, episode
+    return clean_title or Path(filename).stem, season, episode
 
 ANILIST_GRAPHQL_QUERY = """
 query ($search: String) {
@@ -193,9 +245,12 @@ def fetch_from_anilist(title: str) -> Dict:
             "User-Agent": "DSA-Subber/1.0"
         }
     )
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        res = json.loads(resp.read().decode("utf-8"))
-        return res.get("data", {}).get("Media", {}) or {}
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            res = json.loads(resp.read().decode("utf-8"))
+            return res.get("data", {}).get("Media", {}) or {}
+    except Exception:
+        return {}
 
 def fetch_anime_metadata_and_poster(
     filename: str,
@@ -204,16 +259,58 @@ def fetch_anime_metadata_and_poster(
 ) -> Tuple[str, int, int, str, Optional[Path]]:
     """
     Identifies anime English title, Season, Episode, Genres, and downloads
-    official HD Anime Poster thumbnail from TMDB (with AniList fallback).
+    official HD Anime Poster thumbnail matching the exact season.
+    Order of operations:
+      1. Search AniList first for official English Title.
+      2. For thumbnail: search exact season on AniList (e.g. 'Title Season 2').
+      3. Fallback to TMDB if AniList doesn't find title or season poster.
     """
     clean_title, season, episode = parse_anime_info_from_filename(filename)
     english_title = clean_title
     genres = "Animation, Anime"
     poster_url = None
 
-    # Step 1: Try TMDB first if API key is provided
-    if tmdb_api_key:
+    console.print(f"[bold cyan]🔍 Parsed Filename: Title='{clean_title}', Season={season:02d}, Episode={episode:02d}[/bold cyan]")
+
+    # Step 1: Query AniList FIRST (Keyless, comprehensive anime database)
+    base_ani = None
+    try:
+        base_ani = fetch_from_anilist(clean_title)
+        if base_ani:
+            found_eng = base_ani.get("title", {}).get("english")
+            found_romaji = base_ani.get("title", {}).get("romaji")
+            english_title = found_eng or found_romaji or english_title
+            g_list = base_ani.get("genres", [])
+            if g_list:
+                genres = ", ".join(g_list[:3])
+            console.print(f"[bold green]✨ AniList Match: English Title = '{english_title}'[/bold green]")
+    except Exception as e:
+        console.print(f"[dim]⚠️ AniList query notice: {e}[/dim]")
+
+    # Step 2: Fetch exact Season Poster from AniList
+    if season > 1:
         try:
+            # Query AniList for season specific entry e.g. "Tantei wa Mou Shindeiru Season 2"
+            season_ani = fetch_from_anilist(f"{clean_title} Season {season}")
+            if not season_ani and english_title != clean_title:
+                season_ani = fetch_from_anilist(f"{english_title} Season {season}")
+            if season_ani:
+                cover = season_ani.get("coverImage", {})
+                poster_url = cover.get("extraLarge") or cover.get("large")
+                if poster_url:
+                    console.print(f"[bold green]🖼️ Found Season {season:02d} specific poster on AniList![/bold green]")
+        except Exception:
+            pass
+
+    # If season 1 or season-specific AniList poster not found, use base AniList cover
+    if not poster_url and base_ani:
+        cover = base_ani.get("coverImage", {})
+        poster_url = cover.get("extraLarge") or cover.get("large")
+
+    # Step 3: Fallback to TMDB if AniList didn't provide English title or poster
+    if (not english_title or english_title == clean_title or not poster_url) and tmdb_api_key:
+        try:
+            console.print("[dim]🔄 Querying TMDB fallback for anime metadata and season poster...[/dim]")
             if tmdb_api_key.startswith("eyJ"):
                 tmdb_url = f"https://api.themoviedb.org/3/search/tv?query={urllib.parse.quote(clean_title)}&include_adult=false&language=en-US&page=1"
                 headers = {
@@ -226,36 +323,39 @@ def fetch_anime_metadata_and_poster(
                 headers = {"User-Agent": "Mozilla/5.0"}
 
             req = urllib.request.Request(tmdb_url, headers=headers)
-            with urllib.request.urlopen(req, timeout=4) as r:
+            with urllib.request.urlopen(req, timeout=5) as r:
                 tmdb_data = json.loads(r.read().decode("utf-8"))
                 results = tmdb_data.get("results", [])
                 if results:
                     first = results[0]
-                    english_title = first.get("name") or english_title
-                    if first.get("poster_path"):
-                        poster_url = f"https://image.tmdb.org/t/p/w500{first.get('poster_path')}"
-        except Exception as e:
-            console.print(f"[dim]⚠️ TMDB notice ({e}), seamlessly checking AniList...[/dim]")
+                    tv_id = first.get("id")
+                    if not english_title or english_title == clean_title:
+                        english_title = first.get("name") or english_title
 
-    # Step 2: Fallback to AniList (keyless, comprehensive anime database)
-    if not poster_url:
-        try:
-            ani = fetch_from_anilist(clean_title)
-            if ani:
-                english_title = (
-                    ani.get("title", {}).get("english")
-                    or ani.get("title", {}).get("romaji")
-                    or english_title
-                )
-                g_list = ani.get("genres", [])
-                if g_list:
-                    genres = ", ".join(g_list[:3])
-                cover = ani.get("coverImage", {})
-                poster_url = cover.get("extraLarge") or cover.get("large")
-        except Exception as e:
-            console.print(f"[dim]⚠️ AniList query notice: {e}[/dim]")
+                    # If we still need poster, check specific season on TMDB
+                    if not poster_url and tv_id:
+                        if season > 1:
+                            try:
+                                if tmdb_api_key.startswith("eyJ"):
+                                    s_url = f"https://api.themoviedb.org/3/tv/{tv_id}/season/{season}?language=en-US"
+                                    s_req = urllib.request.Request(s_url, headers=headers)
+                                else:
+                                    s_url = f"https://api.themoviedb.org/3/tv/{tv_id}/season/{season}?api_key={tmdb_api_key}"
+                                    s_req = urllib.request.Request(s_url, headers=headers)
+                                with urllib.request.urlopen(s_req, timeout=5) as s_resp:
+                                    s_data = json.loads(s_resp.read().decode("utf-8"))
+                                    if s_data.get("poster_path"):
+                                        poster_url = f"https://image.tmdb.org/t/p/w500{s_data.get('poster_path')}"
+                                        console.print(f"[bold green]🖼️ Found Season {season:02d} poster on TMDB![/bold green]")
+                            except Exception:
+                                pass
 
-    # Step 3: Download and scale poster for Telegram thumbnail
+                        if not poster_url and first.get("poster_path"):
+                            poster_url = f"https://image.tmdb.org/t/p/w500{first.get('poster_path')}"
+        except Exception as e:
+            console.print(f"[dim]⚠️ TMDB fallback notice: {e}[/dim]")
+
+    # Step 4: Download and scale poster for Telegram thumbnail
     poster_thumb_path = None
     if poster_url:
         try:
@@ -275,6 +375,7 @@ def fetch_anime_metadata_and_poster(
             subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
             if out_thumb.exists() and out_thumb.stat().st_size > 0:
                 poster_thumb_path = out_thumb
+                console.print(f"[bold green]🖼️ Anime Season {season:02d} Poster thumbnail ready ({poster_thumb_path.stat().st_size // 1024} KB)[/bold green]")
         except Exception as e:
             console.print(f"[dim]⚠️ Poster download notice: {e}[/dim]")
 
@@ -663,6 +764,8 @@ def send_pipeline_start_notification(task_info: str, quality: str = "720p") -> N
     """Initializes the live tracking notification for Owner ID."""
     try:
         from notifier import notifier
-        notifier.start_pipeline(task_name=task_info, quality=quality)
+        clean_t, s_num, ep_num = parse_anime_info_from_filename(task_info)
+        disp = f"{clean_t} (S{s_num:02d}E{ep_num:02d})"
+        notifier.start_pipeline(task_name=disp, quality=quality)
     except Exception as e:
         console.print(f"[dim]⚠️ Could not initialize live tracker: {e}[/dim]")

@@ -369,8 +369,16 @@ def translate_subtitles_to_hinglish(
     for idx, event in enumerate(subs.events):
         if event.is_comment:
             continue
-        # Skip watermark and info lines so AI doesn't modify them
-        if getattr(event, "style", "") in ("WatermarkTop", "Info") or "DarkSoulAcademy" in event.text:
+        # Strict protection: NEVER translate custom watermark, info, or branding lines (saves API keys)
+        st_lower = getattr(event, "style", "").strip().lower()
+        txt_lower = event.text.lower()
+        if (
+            st_lower in ("watermarktop", "info") 
+            or "watermark" in st_lower 
+            or "darksoulacademy" in txt_lower 
+            or "telegram channel" in txt_lower
+            or "subbed by" in txt_lower
+        ):
             continue
 
         # Extract leading override tags (e.g. {\fs35\pos(100,200)}) to preserve specific dialogue styling

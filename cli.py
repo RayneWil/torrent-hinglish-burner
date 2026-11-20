@@ -82,6 +82,13 @@ def parse_args():
 def main():
     args = parse_args()
 
+    # Notify Owner ID that DSA Subber service has been started
+    try:
+        from notifier import notifier
+        notifier.notify_service_start(cmd_args=sys.argv[1:])
+    except Exception:
+        pass
+
     # If no torrent link provided or --ui flag is passed, launch interactive UI
     if args.ui or not args.torrent:
         from ui import main_menu

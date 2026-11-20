@@ -8,6 +8,7 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeRemainingColumn
 import config
 from config import QUALITY_MAP
+from notifier import notifier
 
 console = Console()
 
@@ -66,6 +67,7 @@ def burn_subtitles_and_encode(
     console.print(f"[bold cyan]🔥 Encoding & Burning Hinglish Subtitles into {quality}...[/bold cyan]")
     console.print(f"[dim]Input: {video_path.name}[/dim]")
     console.print(f"[dim]Resolution Target: {height}p | Filter: {vf_filter}[/dim]")
+    notifier.start_encoding(quality)
 
     cmd = [
         "ffmpeg",
@@ -109,19 +111,30 @@ def burn_subtitles_and_encode(
                     current_seconds = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
                     progress.update(task, completed=min(int(current_seconds), int(total_duration)))
 
+                    pct = min(99.0, (current_seconds / total_duration) * 100.0)
+                    curr_str = f"{int(hours):02d}:{int(minutes):02d}:{int(float(seconds)):02d}"
+                    tot_h = int(total_duration // 3600)
+                    tot_m = int((total_duration % 3600) // 60)
+                    tot_s = int(total_duration % 60)
+                    tot_str = f"{tot_h:02d}:{tot_m:02d}:{tot_s:02d}"
+                    notifier.update_encoding_progress(percent=pct, current_time=curr_str, total_time=tot_str)
+
             process.wait()
 
         if process.returncode != 0:
             console.print(f"[bold red]❌ FFmpeg encoding failed with exit code {process.returncode}![/bold red]")
+            notifier.notify_error("Encoding", f"FFmpeg failed with exit code {process.returncode}")
             sys.exit(1)
 
     except Exception as e:
         console.print("[bold red]❌ Encoding error:[/bold red]")
         console.print(str(e), markup=False)
+        notifier.notify_error("Encoding", str(e))
         sys.exit(1)
 
     file_size_mb = output_path.stat().st_size / (1024 * 1024)
     console.print(f"[bold green]✨ Video Encoding Finished Successfully![/bold green]")
     console.print(f"[bold white]Output file:[/bold white] [green]{output_path}[/green] ([cyan]{file_size_mb:.1f} MB[/cyan])")
+    notifier.finish_encoding(output_path.name, file_size_mb)
 
     return output_path

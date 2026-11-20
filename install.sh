@@ -4,6 +4,8 @@
 #            Compatible with Termux (Android), VPS & Linux
 # =================================================================
 
+# Wrap execution in block to prevent partial execution if curl drops connection
+{
 set -e
 
 echo ""
@@ -104,3 +106,4 @@ elif [ -e /dev/tty ]; then
 else
     python3 ui.py || python ui.py
 fi
+}

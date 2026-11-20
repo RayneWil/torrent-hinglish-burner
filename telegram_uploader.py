@@ -125,16 +125,34 @@ ROMAN_NUMERALS = {
     "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10
 }
 
+def clean_anime_title_name(raw_title: str) -> str:
+    """Cleans broadcast year tags e.g. (2024), cour tags e.g. 1_2, and trailing punctuation."""
+    t = raw_title.strip()
+    # Remove cour or split notation like "1_2" or "1/2" at the very end of title (unless Ranma)
+    if "ranma" not in t.lower():
+        t = re.sub(r'[\s\-_]+(?:1_2|1/2|Part[\s\-_]*\d+|Cour[\s\-_]*\d+)$', '', t, flags=re.IGNORECASE)
+
+    # Remove broadcast/release year in parentheses e.g. (2024), (2023), (2025), [2024]
+    t = re.sub(r'[\s\-_]*[\(\[]\d{4}[\)\]]', '', t)
+
+    # Strip trailing dashes, underscores, dots, spaces
+    t = re.sub(r'[\s\-_.]+$', '', t).strip()
+    return t
+
 def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
     """
     Accurately extracts (clean_title, season, episode) from typical anime filenames.
     Supports all standard release group patterns:
-      '[Erai-raws] Tantei wa Mou Shindeiru Season 2 - 01 [...]' -> ('Tantei wa Mou Shindeiru', 2, 1)
-      '[Erai-raws] Tantei wa Mou Shindeiru 02 - 01 [...]'       -> ('Tantei wa Mou Shindeiru', 2, 1)
-      '[Erai-raws] Tantei wa Mou Shindeiru II - 01 [...]'       -> ('Tantei wa Mou Shindeiru', 2, 1)
-      '[Erai-raws] Tantei wa Mou Shindeiru 01 [...]'            -> ('Tantei wa Mou Shindeiru', 1, 1)
-      '[Erai-raws] Ranma 1_2 (2024) 3rd Season - 01 [...]'      -> ('Ranma 1_2 (2024)', 3, 1)
-      '[SubsPlease] Bleach - S03E05 (1080p) [...]'              -> ('Bleach', 3, 5)
+      '[Erai-raws] Tantei wa Mou Shindeiru S0201 [...]'           -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru S02 - 01 [...]'       -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru 1_2 Season 2 - 01 [...]' -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru (2024) S02 - 01 [...]'  -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru Season 2 - 01 [...]'   -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru 02 - 01 [...]'         -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru II - 01 [...]'         -> ('Tantei wa Mou Shindeiru', 2, 1)
+      '[Erai-raws] Tantei wa Mou Shindeiru 01 [...]'              -> ('Tantei wa Mou Shindeiru', 1, 1)
+      '[Erai-raws] Ranma 1_2 (2024) 3rd Season - 01 [...]'        -> ('Ranma 1_2', 3, 1)
+      '[SubsPlease] Bleach - S03E05 (1080p) [...]'                -> ('Bleach', 3, 5)
     """
     name = Path(filename).stem
     # Remove _Hinglish and anything after it (like _720p, _480p)
@@ -162,57 +180,74 @@ def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
 
     season = 1
     episode = 1
-    clean_title = name
+    raw_title = name
 
     # Pattern 1: Check for S01E08, S1E8, S02 - E01, etc.
     s_e = re.search(r"\b[Ss](\d+)\s*[-_ ]*[Ee](\d+)\b", name)
     if s_e:
         season = int(s_e.group(1))
         episode = int(s_e.group(2))
-        clean_title = name[:s_e.start()].strip(" -_.")
-        return clean_title or name, season, episode
+        raw_title = name[:s_e.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
 
-    # Pattern 2: Check for explicit Season word: Season 2 - 01, 3rd Season - 01, 2nd Season - 06, S2 - 14
-    s_word = re.search(r"\b(?:(\d+)(?:st|nd|rd|th)\s+Season|(?:Season|S)\s*(\d+))\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name, re.IGNORECASE)
+    # Pattern 2: Check for S0201 (S followed by 4 digits: 2 for season, 2 for episode)
+    # e.g. S0201 -> Season 2, Episode 1 | S0108 -> Season 1, Episode 8
+    s_merged = re.search(r"\b[Ss](\d{2})(\d{2})\b", name)
+    if s_merged:
+        season = int(s_merged.group(1))
+        episode = int(s_merged.group(2))
+        raw_title = name[:s_merged.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
+
+    # Pattern 3: Check for S02 - 01 or S2 - 14 (S followed by digits, dash/space, episode)
+    s_dash = re.search(r"\b[Ss](\d+)\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name)
+    if s_dash:
+        season = int(s_dash.group(1))
+        episode = int(s_dash.group(2))
+        raw_title = name[:s_dash.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
+
+    # Pattern 4: Check for explicit Season word: Season 2 - 01, 3rd Season - 01, 2nd Season - 06
+    s_word = re.search(r"\b(?:(\d+)(?:st|nd|rd|th)\s+Season|Season\s*(\d+))\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name, re.IGNORECASE)
     if s_word:
         s_num = s_word.group(1) or s_word.group(2)
         season = int(s_num)
         episode = int(s_word.group(3))
-        clean_title = name[:s_word.start()].strip(" -_.")
-        return clean_title or name, season, episode
+        raw_title = name[:s_word.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
 
-    # Pattern 3: Check for Roman numerals before episode: Title II - 01, Title III - 01
+    # Pattern 5: Check for Roman numerals before episode: Title II - 01, Title III - 01
     roman_m = re.search(r"\b(I|II|III|IV|V|VI|VII|VIII|IX|X)\s*[-_ ]+(?:(?:EP|Ep|Episode)\s*)?(\d+)\b", name)
     if roman_m:
         season = ROMAN_NUMERALS.get(roman_m.group(1), 1)
         episode = int(roman_m.group(2))
-        clean_title = name[:roman_m.start()].strip(" -_.")
-        return clean_title or name, season, episode
+        raw_title = name[:roman_m.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
 
-    # Pattern 4: Check for Season Number - Episode Number: Title 02 - 01
+    # Pattern 6: Check for Season Number - Episode Number: Title 02 - 01
     two_nums = re.search(r"\b(\d{1,2})\s*-\s*(\d{1,4})\b$", name)
     if two_nums:
         season = int(two_nums.group(1))
         episode = int(two_nums.group(2))
-        clean_title = name[:two_nums.start()].strip(" -_.")
-        return clean_title or name, season, episode
+        raw_title = name[:two_nums.start()]
+        return clean_anime_title_name(raw_title) or name, season, episode
 
-    # Pattern 5: Check for standalone Season mention: Title Season 2
+    # Pattern 7: Check for standalone Season mention: Title Season 2
     s_only = re.search(r"\b(?:(\d+)(?:st|nd|rd|th)\s+Season|(?:Season|S)\s*(\d+))\b", name, re.IGNORECASE)
     if s_only:
         s_num = s_only.group(1) or s_only.group(2)
         season = int(s_num)
         name = (name[:s_only.start()] + name[s_only.end():]).strip(" -_.")
 
-    # Pattern 6: Check for single Episode at the end: Title - 08 or Title 01
+    # Pattern 8: Check for single Episode at the end: Title - 08 or Title 01
     ep_only = re.search(r"(?:[-_ ]+(?:EP|Ep|Episode)?\s*|^)(\d{1,4})(?:\s*v\d+)?$", name)
     if ep_only:
         episode = int(ep_only.group(1))
-        clean_title = name[:ep_only.start()].strip(" -_.")
+        raw_title = name[:ep_only.start()]
     else:
-        clean_title = name.strip(" -_.")
+        raw_title = name
 
-    return clean_title or Path(filename).stem, season, episode
+    return clean_anime_title_name(raw_title) or Path(filename).stem, season, episode
 
 ANILIST_GRAPHQL_QUERY = """
 query ($search: String) {
@@ -276,6 +311,8 @@ def fetch_anime_metadata_and_poster(
     base_ani = None
     try:
         base_ani = fetch_from_anilist(clean_title)
+        if not base_ani and "_" in clean_title:
+            base_ani = fetch_from_anilist(clean_title.replace("_", " "))
         if base_ani:
             found_eng = base_ani.get("title", {}).get("english")
             found_romaji = base_ani.get("title", {}).get("romaji")

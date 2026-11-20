@@ -147,12 +147,12 @@ def start_burning_workflow(quality: str):
         font_size = config.QUALITY_MAP[quality]["fontsize"]
         subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
 
-        # Step 4: AI Hinglish Translation (30 lines/req, 20 reqs/key)
-        console.rule("[bold cyan]Step 4: AI Hinglish Translation (30 lines/req)[/bold cyan]")
+        # Step 4: AI Hinglish Translation (20 lines/req, 20 reqs/key)
+        console.rule("[bold cyan]Step 4: AI Hinglish Translation (20 lines/req)[/bold cyan]")
         hinglish_subs = translate_subtitles_to_hinglish(
             subs,
             api_keys=config.GEMINI_API_KEYS,
-            batch_size=30,
+            batch_size=20,
             max_requests_per_key=20
         )
         

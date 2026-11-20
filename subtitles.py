@@ -132,14 +132,14 @@ def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: Optional[i
     except Exception:
         pass
 
-    if rx == 1280 and ry == 720:
+    if rx == 1920 and ry == 1080:
+        target_fontsize = 80
+    elif rx == 1280 and ry == 720:
         target_fontsize = 52
     elif rx == 640 and ry == 360:
         target_fontsize = 26
     elif font_size is not None:
         target_fontsize = font_size
-    elif rx == 1920 and ry == 1080:
-        target_fontsize = 54
     else:
         target_fontsize = ASS_STYLE_DEFAULTS.get("fontsize", 22)
 
@@ -255,11 +255,14 @@ def inject_watermark_into_file(file_path: Path):
                     break
 
         # Determine target subtitle font size based on resolution:
-        # - PlayResX: 1280 | PlayResY: 720 -> font size 52
-        # - PlayResX: 640  | PlayResY: 360 -> font size 26
+        # - PlayResX: 1920 | PlayResY: 1080 -> font size 80
+        # - PlayResX: 1280 | PlayResY: 720  -> font size 52
+        # - PlayResX: 640  | PlayResY: 360  -> font size 26
         # (Custom watermark styles Info and WatermarkTop are strictly protected)
         chosen_fontsize = None
-        if target_rx == 1280 and target_ry == 720:
+        if target_rx == 1920 and target_ry == 1080:
+            chosen_fontsize = "80"
+        elif target_rx == 1280 and target_ry == 720:
             chosen_fontsize = "52"
         elif target_rx == 640 and target_ry == 360:
             chosen_fontsize = "26"

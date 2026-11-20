@@ -164,7 +164,13 @@ class TelegramNotifier:
             from pathlib import Path
             task_name = Path(task_name).stem
 
-        self.task_name = task_name
+        try:
+            from telegram_uploader import parse_anime_info_from_filename
+            clean_t, s_num, ep_num = parse_anime_info_from_filename(task_name)
+            self.task_name = f"{clean_t} (S{s_num:02d}E{ep_num:02d})"
+        except Exception:
+            self.task_name = task_name[:50]
+
         self.quality = quality
         self.live_message_id = None
         self.state["download"] = "⏳ Connecting to BitTorrent swarm..."

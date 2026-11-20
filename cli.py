@@ -127,12 +127,12 @@ def main():
         font_size = config.QUALITY_MAP[args.quality]["fontsize"]
         subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
 
-        # Step 4: Translate to Hinglish (30 lines/request, auto-shift after 20 requests)
+        # Step 4: Translate to Hinglish (20 lines/request, auto-shift after 20 requests)
         console.rule("[bold yellow]Step 4: AI Hinglish Translation (Multi-Key Rotation)[/bold yellow]")
         hinglish_subs = translate_subtitles_to_hinglish(
             subs,
             api_keys=api_keys,
-            batch_size=30,
+            batch_size=20,
             max_requests_per_key=20
         )
         final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"

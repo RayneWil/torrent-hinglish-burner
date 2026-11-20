@@ -80,6 +80,8 @@ def burn_subtitles_and_encode(
         "-c:a", "aac",
         "-b:a", audio_bitrate,
         "-sn",  # Drop embedded subtitle streams since we are burning them in
+        "-nostats",
+        "-progress", "pipe:1",
         str(output_path.resolve())
     ]
 
@@ -89,10 +91,9 @@ def burn_subtitles_and_encode(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,
             universal_newlines=True
         )
-
-        time_pattern = re.compile(r"time=(\d+):(\d+):(\d+.\d+)")
 
         with Progress(
             SpinnerColumn(),
@@ -104,20 +105,48 @@ def burn_subtitles_and_encode(
         ) as progress:
             task = progress.add_task(f"[yellow]Encoding {quality}...", total=int(total_duration) if total_duration > 0 else 100)
 
-            for line in process.stdout:
-                match = time_pattern.search(line)
-                if match and total_duration > 0:
-                    hours, minutes, seconds = match.groups()
-                    current_seconds = int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-                    progress.update(task, completed=min(int(current_seconds), int(total_duration)))
+            current_seconds = 0.0
+            last_notified_pct = -1.0
 
-                    pct = min(99.0, (current_seconds / total_duration) * 100.0)
-                    curr_str = f"{int(hours):02d}:{int(minutes):02d}:{int(float(seconds)):02d}"
-                    tot_h = int(total_duration // 3600)
-                    tot_m = int((total_duration % 3600) // 60)
-                    tot_s = int(total_duration % 60)
-                    tot_str = f"{tot_h:02d}:{tot_m:02d}:{tot_s:02d}"
-                    notifier.update_encoding_progress(percent=pct, current_time=curr_str, total_time=tot_str)
+            for line in process.stdout:
+                line_str = line.strip()
+                if not line_str:
+                    continue
+
+                if line_str.startswith("out_time_us="):
+                    try:
+                        us = int(line_str.split("=")[1])
+                        if us > 0:
+                            current_seconds = us / 1_000_000.0
+                    except Exception:
+                        pass
+                elif line_str.startswith("out_time="):
+                    t_val = line_str.split("=")[1].strip()
+                    parts = t_val.split(":")
+                    if len(parts) == 3:
+                        try:
+                            current_seconds = int(parts[0]) * 3600 + int(parts[1]) * 60 + float(parts[2])
+                        except Exception:
+                            pass
+                elif line_str in ("progress=continue", "progress=end"):
+                    if total_duration > 0:
+                        progress.update(task, completed=min(int(current_seconds), int(total_duration)))
+                        pct = min(99.0, (current_seconds / total_duration) * 100.0)
+
+                        curr_h = int(current_seconds // 3600)
+                        curr_m = int((current_seconds % 3600) // 60)
+                        curr_s = int(current_seconds % 60)
+                        curr_str = f"{curr_h:02d}:{curr_m:02d}:{curr_s:02d}"
+
+                        tot_h = int(total_duration // 3600)
+                        tot_m = int((total_duration % 3600) // 60)
+                        tot_s = int(total_duration % 60)
+                        tot_str = f"{tot_h:02d}:{tot_m:02d}:{tot_s:02d}"
+
+                        # Update Telegram live tracker on 1% steps or completion
+                        if pct - last_notified_pct >= 1.0 or line_str == "progress=end":
+                            last_notified_pct = pct
+                            notifier.update_encoding_progress(percent=pct, current_time=curr_str, total_time=tot_str)
 
             process.wait()
 

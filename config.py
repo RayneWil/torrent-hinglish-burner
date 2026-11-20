@@ -58,6 +58,29 @@ else:
 # GitHub Token
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
 
+# Telegram Auto-Upload Configuration (Telethon MTProto up to 2GB)
+_ENCODED_TG_BOT_TOKEN = "ODgzNDUyNDg4NDpBQUYxVXZOS2lwOEdxN2tHVlV2M1c0YlFvblY5VUZ0cWhMZw=="
+DEFAULT_TG_BOT_TOKEN = base64.b64decode(_ENCODED_TG_BOT_TOKEN).decode()
+DEFAULT_TG_API_ID = 37404886
+DEFAULT_TG_API_HASH = "f0005465325c4138277ddf8153ce360c"
+DEFAULT_TG_CHAT_ID = -1003511011855
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", DEFAULT_TG_BOT_TOKEN).strip()
+try:
+    TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", str(DEFAULT_TG_API_ID)).strip())
+except Exception:
+    TELEGRAM_API_ID = DEFAULT_TG_API_ID
+TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", DEFAULT_TG_API_HASH).strip()
+
+raw_chat_id = os.getenv("TELEGRAM_CHAT_ID", str(DEFAULT_TG_CHAT_ID)).strip()
+try:
+    TELEGRAM_CHAT_ID = int(raw_chat_id)
+except Exception:
+    TELEGRAM_CHAT_ID = raw_chat_id
+
+TELEGRAM_AUTO_UPLOAD = os.getenv("TELEGRAM_AUTO_UPLOAD", "true").lower() in ("true", "1", "yes")
+TELEGRAM_UPLOAD_SUBTITLE = os.getenv("TELEGRAM_UPLOAD_SUBTITLE", "true").lower() in ("true", "1", "yes")
+
 # Working Directories
 TEMP_DIR = Path(os.getenv("TEMP_DIR", BASE_DIR / "temp"))
 TEMP_DIR.mkdir(parents=True, exist_ok=True)

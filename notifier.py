@@ -314,6 +314,50 @@ class TelegramNotifier:
             f"🔥 <i>All steps completed: Download ➔ Translation ➔ Encoding ➔ Upload! 🚀</i>"
         )
 
+    def notify_service_start(self, cmd_args: Optional[list] = None):
+        """Notifies Owner ID whenever someone starts the DSA Subber service via command."""
+        if not self.is_configured:
+            return
+        if getattr(self, "_service_started_flag", False):
+            return
+        self._service_started_flag = True
+
+        import os
+        import sys
+        import socket
+        import platform
+        from datetime import datetime
+
+        try:
+            hostname = socket.gethostname()
+        except Exception:
+            hostname = "Device"
+
+        is_termux = "termux" in sys.prefix.lower() or os.path.exists("/data/data/com.termux")
+        os_info = "Termux (Android)" if is_termux else f"{platform.system()} ({platform.release()})"
+        now_str = datetime.now().strftime("%d %b %Y | %I:%M:%S %p")
+
+        cmd_str = "dsa"
+        if cmd_args:
+            clean_args = " ".join(cmd_args)[:80]
+            cmd_str = f"dsa {clean_args}"
+
+        msg = (
+            f"👑 <b>Boss, DSA Subber Service Start Kiya Gaya Hai!</b>\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n"
+            f"⚡ <b>Service:</b> DSA Subber\n"
+            f"📱 <b>System:</b> {os_info} ({hostname})\n"
+            f"⏰ <b>Start Time:</b> {now_str}\n"
+            f"💻 <b>Command:</b> <code>{cmd_str}</code>\n"
+            f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n"
+            f"<i>Boss, DSA Subber is now actively running! 🚀</i>"
+        )
+        try:
+            self.send_message(msg, disable_notification=False)
+            console.print(f"[bold green]📬 Sent service start notification to Boss (Owner ID: {self.owner_id})[/bold green]")
+        except Exception:
+            pass
+
     def notify_error(self, step_name: str, error_message: str):
         """Notifies Owner immediately if any pipeline stage fails."""
         self.state["current_status"] = f"❌ Error in {step_name} stage: {error_message[:40]}"

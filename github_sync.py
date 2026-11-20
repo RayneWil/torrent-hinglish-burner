@@ -129,9 +129,17 @@ def sync_all_files(token: str, username: Optional[str] = None, repo_name: str = 
         "ui.py",
         "install.sh",
         "setup.sh",
-        "fonts/Helvetica_Rounded_LT_Std_Bold_Condensed.otf",
         "github_sync.py"
     ]
+
+    # Automatically include all fonts in fonts directory
+    fonts_dir = BASE_DIR / "fonts"
+    if fonts_dir.exists():
+        for font_file in sorted(fonts_dir.glob("*")):
+            if font_file.is_file():
+                rel_path = f"fonts/{font_file.name}"
+                if rel_path not in files_to_upload:
+                    files_to_upload.append(rel_path)
 
     for fname in files_to_upload:
         fpath = BASE_DIR / fname

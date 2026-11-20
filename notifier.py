@@ -7,6 +7,7 @@ via official Telegram Bot API (HTTP REST - fast, reliable, zero session conflict
 import re
 import time
 import json
+import threading
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -144,12 +145,15 @@ class TelegramNotifier:
             "parse_mode": "HTML",
             "disable_web_page_preview": True
         }
-        res = self._api_call("editMessageText", payload)
-        if res:
-            self.last_edit_time = now
-        else:
-            # If edit failed (e.g. message deleted), resend fresh card
-            pass
+        self.last_edit_time = now
+
+        def _async_send_edit(p):
+            try:
+                self._api_call("editMessageText", p)
+            except Exception:
+                pass
+
+        threading.Thread(target=_async_send_edit, args=(payload,), daemon=True).start()
 
     # =========================================================================
     # PIPELINE LIFECYCLE HOOKS

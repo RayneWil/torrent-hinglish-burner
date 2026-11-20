@@ -1,3 +1,4 @@
+import re
 import shutil
 import subprocess
 import sys
@@ -6,6 +7,7 @@ from pathlib import Path
 from typing import Optional, List
 from rich.console import Console
 from rich.markup import escape
+from notifier import notifier
 
 console = Console()
 
@@ -110,6 +112,20 @@ def download_torrent(source: str, download_dir: Path) -> Path:
                 continue
             if any(k in clean_line for k in ["[#", "ETA:", "Download Speed:", "CN:", "SD:"]):
                 console.print(f"[bold green]{escape(clean_line)}[/bold green]")
+                
+                # Live parse aria2c progress for owner notifications
+                pct_m = re.search(r'\((\d+)%\)', clean_line)
+                dl_m = re.search(r'DL:([^\s\]]+)', clean_line)
+                eta_m = re.search(r'ETA:([^\s\]]+)', clean_line)
+                cn_m = re.search(r'CN:(\d+)', clean_line)
+
+                pct_val = float(pct_m.group(1)) if pct_m else None
+                dl_val = dl_m.group(1) if dl_m else ""
+                eta_val = eta_m.group(1) if eta_m else ""
+                cn_val = int(cn_m.group(1)) if cn_m else 0
+
+                notifier.update_download_progress(percent=pct_val, speed_str=dl_val, eta_str=eta_val, cn=cn_val)
+
             elif "Download complete:" in clean_line or "errorCode=" in clean_line:
                 console.print(f"[bold yellow]{escape(clean_line)}[/bold yellow]")
 
@@ -117,20 +133,25 @@ def download_torrent(source: str, download_dir: Path) -> Path:
 
         if process.returncode != 0:
             console.print(f"[bold red]❌ aria2c exited with returncode {process.returncode}[/bold red]")
+            notifier.notify_error("Download", f"aria2c exited with code {process.returncode}")
             sys.exit(1)
 
     except Exception as e:
         console.print("[bold red]❌ Exception during download:[/bold red]")
         console.print(str(e), markup=False)
+        notifier.notify_error("Download", str(e))
         sys.exit(1)
 
     # Find the downloaded video file
     video_file = find_largest_video(download_dir)
     if not video_file:
         console.print(f"[bold red]❌ No video file found in {download_dir}![/bold red]")
+        notifier.notify_error("Download", f"No video file found in {download_dir}")
         sys.exit(1)
 
-    console.print(f"[bold green]✅ Download Finished: {video_file.name} ({video_file.stat().st_size / (1024*1024):.1f} MB)[/bold green]")
+    size_mb = video_file.stat().st_size / (1024 * 1024)
+    console.print(f"[bold green]✅ Download Finished: {video_file.name} ({size_mb:.1f} MB)[/bold green]")
+    notifier.finish_download(video_file.name, size_mb)
     return video_file
 
 def find_largest_video(directory: Path) -> Optional[Path]:

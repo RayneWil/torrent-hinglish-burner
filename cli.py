@@ -24,7 +24,7 @@ console = Console()
 BANNER = """
 [bold cyan]╔═══════════════════════════════════════════════════════╗
 ║         🔥 TORRENT TO HINGLISH BURNER CLI 🔥          ║
-║      Magnet ➔ Hinglish (.ASS) ➔ 480p/720p Hardcode     ║
+║   Magnet ➔ Hinglish (.ASS) ➔ 480p/720p/1080p Hardcode ║
 ║        [Multi-API Key Pool & Auto-Rotation Active]    ║
 ╚═══════════════════════════════════════════════════════╝[/bold cyan]
 """
@@ -34,7 +34,7 @@ def print_banner():
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Download torrent, translate subtitles to Hinglish (.ass) & burn into 480p/720p video."
+        description="Download torrent, translate subtitles to Hinglish (.ass) & burn into 480p/720p/1080p video."
     )
     parser.add_argument(
         "-t", "--torrent",
@@ -45,9 +45,9 @@ def parse_args():
     parser.add_argument(
         "-q", "--quality",
         type=str,
-        choices=["480p", "720p"],
+        choices=["480p", "720p", "1080p"],
         default="720p",
-        help="Target output video quality (480p or 720p). Default: 720p"
+        help="Target output video quality (480p, 720p, or 1080p). Default: 720p"
     )
     parser.add_argument(
         "-k", "--api-keys",

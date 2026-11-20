@@ -88,6 +88,12 @@ except Exception:
 TELEGRAM_AUTO_UPLOAD = os.getenv("TELEGRAM_AUTO_UPLOAD", "true").lower() in ("true", "1", "yes")
 TELEGRAM_UPLOAD_SUBTITLE = os.getenv("TELEGRAM_UPLOAD_SUBTITLE", "true").lower() in ("true", "1", "yes")
 
+# TMDB & AniList Metadata Configuration
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
+
+# Telegram Caption Style: "style2" (Compact dashed) or "style1" (Boxed with genres)
+TELEGRAM_CAPTION_STYLE = os.getenv("TELEGRAM_CAPTION_STYLE", "style2").strip().lower()
+
 # Working Directories
 TEMP_DIR = Path(os.getenv("TEMP_DIR", BASE_DIR / "temp"))
 TEMP_DIR.mkdir(parents=True, exist_ok=True)

@@ -45,7 +45,7 @@ def burn_subtitles_and_encode(
     quality: str = "720p"
 ) -> Path:
     """
-    Burns .ass subtitles into video and compresses/rescales to 480p or 720p using FFmpeg.
+    Burns .ass subtitles into video and compresses/rescales to 480p, 720p, or 1080p using FFmpeg.
     """
     if quality not in QUALITY_MAP:
         quality = "720p"

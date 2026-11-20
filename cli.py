@@ -150,6 +150,12 @@ def main():
             quality=args.quality
         )
 
+        # Step 6: Upload to Telegram Channel (if enabled)
+        if config.TELEGRAM_AUTO_UPLOAD:
+            console.rule("[bold cyan]Step 6: Uploading to Telegram Channel[/bold cyan]")
+            from telegram_uploader import upload_to_telegram
+            upload_to_telegram(final_video_path, final_ass_path, quality=args.quality)
+
         # Summary Table
         table = Table(title="🎉 Processing Complete!", border_style="green")
         table.add_column("Property", style="cyan", no_wrap=True)

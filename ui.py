@@ -126,6 +126,13 @@ def start_burning_workflow(quality: str):
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     try:
+        # Send start notification to Telegram Owner if configured
+        try:
+            from telegram_uploader import send_pipeline_start_notification
+            send_pipeline_start_notification(torrent_input)
+        except Exception:
+            pass
+
         # Step 1: Downloading
         console.rule("[bold cyan]Step 1: Downloading Torrent Video[/bold cyan]")
         video_file = download_torrent(torrent_input, temp_dir)
@@ -225,6 +232,21 @@ def test_telegram_connection():
                     parse_mode="html"
                 )
                 console.print(f"[bold green]🎉 Test message delivered successfully to your channel (Message ID: {msg.id})![/bold green]")
+
+                # Send test message to Owner ID
+                if config.TELEGRAM_OWNER_ID:
+                    try:
+                        await client.send_message(
+                            config.TELEGRAM_OWNER_ID,
+                            f"👋 <b>Hello Boss! (Owner ID: {config.TELEGRAM_OWNER_ID})</b>\n\n"
+                            f"DSA Subber Bot (@{me.username}) is connected to your personal chat!\n"
+                            f"You will receive start alerts and live video upload progress bars here! 🚀",
+                            parse_mode="html"
+                        )
+                        console.print(f"[bold green]📬 Test message sent to Owner ({config.TELEGRAM_OWNER_ID}) successfully![/bold green]")
+                    except Exception as ex:
+                        console.print(f"[yellow]⚠️ Could not DM Owner ({config.TELEGRAM_OWNER_ID}): {ex}[/yellow]")
+                        console.print(f"[dim]💡 Please open @{me.username} in Telegram and click /start so the bot can DM you![/dim]")
             except Exception as err:
                 console.print(f"[bold red]❌ Telegram connection failed: {err}[/bold red]")
                 console.print("[yellow]💡 Note: Ensure your bot is added as an Administrator with 'Post Messages' permission in your channel![/yellow]")
@@ -250,6 +272,7 @@ def manage_telegram_settings():
             f"[bold white]✈️ Telegram Auto-Uploader Configuration[/bold white]\n\n"
             f"• [bold]Auto-Upload Status:[/bold] {status_text}\n"
             f"• [bold]Target Channel/Chat ID:[/bold] [bold cyan]{config.TELEGRAM_CHAT_ID}[/bold cyan]\n"
+            f"• [bold]Owner Notification ID:[/bold] [bold cyan]{config.TELEGRAM_OWNER_ID}[/bold cyan]\n"
             f"• [bold]Upload .ass Subtitle:[/bold] [bold cyan]{'Yes' if config.TELEGRAM_UPLOAD_SUBTITLE else 'No'}[/bold cyan]\n"
             f"• [bold]Engine:[/bold] [bold green]Telethon MTProto (Supports up to 2 GB)[/bold green]\n\n"
             "[bold cyan][1][/bold cyan] 🔄 [bold]Toggle Auto-Upload (ON / OFF)[/bold]\n"

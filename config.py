@@ -89,7 +89,9 @@ TELEGRAM_AUTO_UPLOAD = os.getenv("TELEGRAM_AUTO_UPLOAD", "true").lower() in ("tr
 TELEGRAM_UPLOAD_SUBTITLE = os.getenv("TELEGRAM_UPLOAD_SUBTITLE", "true").lower() in ("true", "1", "yes")
 
 # TMDB & AniList Metadata Configuration
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
+_ENCODED_TMDB_TOKEN = "ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkzWlROa01tVTRPRGM0WkRaaE9UaGxZbVpoTldVNFlURmxNRE01TVRRMFpDSXNJbTVpWmlJNk1UYzFOVFEzTmpNMU15NDROVElzSW5OMVlpSTZJalk0WVRJM01UZ3hNRGcyTkdJMFpEZG1OamczTURNMU5TSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLmdJUUtiOE5jeC1BblRNanhCM1BjNm9UQ25COUtiMkdtVklFNjZodjBNdWM="
+DEFAULT_TMDB_API_KEY = base64.b64decode(_ENCODED_TMDB_TOKEN).decode()
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", DEFAULT_TMDB_API_KEY).strip()
 
 # Telegram Caption Style: "style2" (Compact dashed) or "style1" (Boxed with genres)
 TELEGRAM_CAPTION_STYLE = os.getenv("TELEGRAM_CAPTION_STYLE", "style2").strip().lower()

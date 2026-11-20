@@ -275,13 +275,26 @@ def translate_subtitles_to_hinglish(
 
     # Extract all dialogue lines
     dialogues_to_translate = []
+    prefix_tags_map = {}
     for idx, event in enumerate(subs.events):
         if event.is_comment:
             continue
         # Skip watermark lines so AI doesn't modify them
         if getattr(event, "style", "") == "WatermarkTop" or "DarkSoulAcademy" in event.text:
             continue
-        cleaned = clean_sub_text(event.text)
+
+        # Extract leading override tags (e.g. {\fs35\pos(100,200)}) to preserve specific dialogue styling
+        raw_text = event.text
+        tag_match = re.match(r"^((?:\{[^{}]*\})+)(.*)$", raw_text)
+        if tag_match:
+            prefix_tags = tag_match.group(1)
+            content_text = tag_match.group(2)
+        else:
+            prefix_tags = ""
+            content_text = raw_text
+
+        prefix_tags_map[idx] = prefix_tags
+        cleaned = clean_sub_text(content_text)
         if cleaned:
             dialogues_to_translate.append({"id": idx, "text": cleaned})
 
@@ -302,10 +315,11 @@ def translate_subtitles_to_hinglish(
         # Small delay between requests to be gentle on rate limits
         time.sleep(0.4)
 
-    # Apply translated texts back to SSAFile
+    # Apply translated texts back to SSAFile, strictly preserving specific dialogue tags (like {\fs...})
     for idx, event in enumerate(subs.events):
         if idx in translations_map:
-            event.text = translations_map[idx]
+            prefix = prefix_tags_map.get(idx, "")
+            event.text = f"{prefix}{translations_map[idx]}"
 
     console.print("[bold green]✅ Translation to Hinglish Completed Successfully![/bold green]")
     return subs

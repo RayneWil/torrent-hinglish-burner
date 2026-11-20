@@ -114,19 +114,38 @@ def extract_subtitle(video_path: Path, output_sub_path: Path, track_index: Optio
     console.print("[bold red]❌ No embedded or external subtitles found for this video![/bold red]")
     sys.exit(1)
 
-def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: int = 22):
+def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: Optional[int] = None):
     """
     Applies 'HelveticaRounded LT Std BdCn' to all dialogue styles.
+    If resolution is 1280x720 (PlayResX: 1280, PlayResY: 720), sets fontsize to 52 across all styles.
     Protects custom watermark styles (Info, WatermarkTop).
     """
     target_font = ASS_STYLE_DEFAULTS.get("fontname", "HelveticaRounded LT Std BdCn")
     protected_styles = {"Info", "WatermarkTop"}
 
+    # Detect resolution
+    rx = None
+    ry = None
+    try:
+        rx = int(subs.info.get("PlayResX", 0))
+        ry = int(subs.info.get("PlayResY", 0))
+    except Exception:
+        pass
+
+    if rx == 1280 and ry == 720:
+        target_fontsize = 52
+    elif font_size is not None:
+        target_fontsize = font_size
+    elif rx == 1920 and ry == 1080:
+        target_fontsize = 54
+    else:
+        target_fontsize = ASS_STYLE_DEFAULTS.get("fontsize", 22)
+
     # If no styles, create Default
     if not subs.styles:
         default_style = pysubs2.SSAStyle()
         default_style.fontname = target_font
-        default_style.fontsize = font_size or ASS_STYLE_DEFAULTS["fontsize"]
+        default_style.fontsize = target_fontsize
         default_style.primarycolor = pysubs2.Color(255, 255, 255)
         default_style.outlinecolor = pysubs2.Color(0, 0, 0)
         default_style.bold = True
@@ -135,17 +154,16 @@ def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: int = 22):
         subs.styles["Default"] = default_style
 
     for style_name, style in subs.styles.items():
-        if style_name in protected_styles:
+        if style_name in protected_styles or "watermark" in style_name.lower():
             continue
         style.fontname = target_font
-        if font_size:
-            style.fontsize = font_size
+        style.fontsize = target_fontsize
         style.outline = max(style.outline, 2.5)
         style.shadow = max(style.shadow, 1.0)
 
-    console.print(f"[bold cyan]🎨 Applied font '{target_font}' across all subtitle styles![/bold cyan]")
+    console.print(f"[bold cyan]🎨 Applied font '{target_font}' (fontsize: {target_fontsize}) across all subtitle styles![/bold cyan]")
 
-def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSAFile:
+def load_and_style_subtitles(sub_path: Path, font_size: Optional[int] = None) -> pysubs2.SSAFile:
     """Loads subtitle file using pysubs2 and formats all styles with the target custom font."""
     subs = pysubs2.load(str(sub_path.resolve()))
     apply_custom_font_to_all_styles(subs, font_size=font_size)
@@ -233,6 +251,33 @@ def inject_watermark_into_file(file_path: Path):
                     if not has_ry:
                         lines.insert(i + 2, f"PlayResY: {target_ry}")
                     break
+
+        # If PlayResX: 1280 and PlayResY: 720, set font size to 52 across all subtitle dialogue styles
+        # (Custom watermark styles Info and WatermarkTop are strictly protected)
+        if target_rx == 1280 and target_ry == 720:
+            fontsize_idx = 2
+            name_idx = 0
+            for l in lines:
+                l_strip = l.strip()
+                if l_strip.startswith("Format:") and "name" in l_strip.lower() and "fontsize" in l_strip.lower():
+                    cols = [c.strip().lower() for c in l_strip.replace("Format:", "").split(",")]
+                    if "name" in cols:
+                        name_idx = cols.index("name")
+                    if "fontsize" in cols:
+                        fontsize_idx = cols.index("fontsize")
+                    break
+
+            protected_style_names = {"info", "watermarktop"}
+            for i, line in enumerate(lines):
+                match = re.match(r"^(Style:\s*)(.*)$", line)
+                if match:
+                    prefix = match.group(1)
+                    parts = match.group(2).split(",")
+                    if len(parts) > max(name_idx, fontsize_idx):
+                        style_name = parts[name_idx].strip().lower()
+                        if style_name not in protected_style_names and "watermark" not in style_name:
+                            parts[fontsize_idx] = "52"
+                            lines[i] = f"{prefix}{','.join(parts)}"
 
         # 1. Place styles 2 LINES BELOW ALL EXISTING STYLES (leave a blank line before)
         last_style_idx = -1

@@ -46,9 +46,8 @@ def download_torrent(source: str, download_dir: Path) -> Path:
     """
     Downloads video using aria2c with maximum speed optimizations:
     - Tracker injection for maximum peer discovery
-    - DHT bootstrapping
-    - High-connection pooling
-    - Minimal upload throttling to prevent choking mobile bandwidth
+    - Persistent DHT routing cache (~/.cache/dsa_subber/dht.dat) for instant peer connection
+    - High-connection pooling and unchoked upload for high BitTorrent swarm priority
     """
     if not check_aria2c():
         console.print("[bold red]❌ Error: aria2c is not installed or not in PATH![/bold red]")
@@ -60,9 +59,19 @@ def download_torrent(source: str, download_dir: Path) -> Path:
     # Inject trackers into magnet link
     if source.startswith("magnet:"):
         source = inject_trackers_into_magnet(source)
-        console.print("[bold cyan]🚀 Injected 12 high-speed trackers for maximum download speed![/bold cyan]")
+        console.print("[bold cyan]🚀 Injected 12 high-speed trackers for maximum swarm discovery![/bold cyan]")
 
     console.print(f"[bold cyan]📥 Starting Supercharged Torrent Download via aria2c...[/bold cyan]")
+
+    # Persistent DHT cache for instant connection on subsequent downloads
+    dht_file_arg = None
+    try:
+        cache_dir = Path.home() / ".cache" / "dsa_subber"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        dht_path = cache_dir / "dht.dat"
+        dht_file_arg = f"--dht-file-path={dht_path}"
+    except Exception:
+        pass
 
     # Build heavily optimized aria2c command
     cmd = [
@@ -71,27 +80,33 @@ def download_torrent(source: str, download_dir: Path) -> Path:
         "--max-connection-per-server=16",
         "--split=16",
         "--min-split-size=1M",
-        "--summary-interval=1",
+        "--summary-interval=2",
         "--file-allocation=none",           # Immediate start on Android/Termux
         "--enable-dht=true",
         "--enable-dht6=false",
-        "--dht-entry-point=router.bittorrent.com:6881",
+        "--dht-entry-point=dht.transmissionbt.com:6881",
         "--dht-listen-port=6881-6999",
         "--enable-peer-exchange=true",
         "--bt-enable-lpd=true",
         "--bt-max-peers=150",               # Connect to up to 150 peers simultaneously
         "--bt-request-peer-speed-limit=0",  # No speed cap per peer
-        "--bt-tracker-connect-timeout=5",
-        "--bt-tracker-timeout=5",
+        "--bt-tracker-connect-timeout=3",   # Quickly skip dead trackers
+        "--bt-tracker-timeout=3",
+        "--bt-tracker-interval=15",
+        "--bt-tracker=" + ",".join(HIGH_SPEED_TRACKERS),
         "--peer-id-prefix=-TR3000-",        # Mimic Transmission 3.0 to bypass client blocks
         "--user-agent=Transmission/3.00",
-        "--max-overall-upload-limit=20K",   # Restrict upload choking mobile download bandwidth
+        "--max-overall-upload-limit=150K",  # Healthy upload rate prevents seeders from choking us
         "--follow-torrent=mem",
         "--console-log-level=warn",
         "--dir", str(download_dir.resolve()),
-        "--bt-stop-timeout=600",
-        source
+        "--bt-stop-timeout=600"
     ]
+
+    if dht_file_arg:
+        cmd.append(dht_file_arg)
+
+    cmd.append(source)
 
     try:
         process = subprocess.Popen(
@@ -103,15 +118,28 @@ def download_torrent(source: str, download_dir: Path) -> Path:
             universal_newlines=True
         )
 
-        # Print output lines cleanly without markup injection errors
+        metadata_announced = False
+        # Print output lines cleanly without tracker timeout noise or repetitive 0B lines
         for line in process.stdout:
             clean_line = line.strip()
             if not clean_line:
                 continue
+
+            # Ignore harmless tracker connection timeouts
+            if "errorCode=2 Timeout" in clean_line or "AbstractCommand.cc" in clean_line:
+                continue
+
+            # While fetching initial magnet metadata, show single clean notice instead of 50 spam lines
+            if "0B/0B" in clean_line:
+                if not metadata_announced:
+                    console.print("[dim cyan]🔍 Resolving magnet metadata & connecting to swarm...[/dim cyan]")
+                    metadata_announced = True
+                continue
+
             if any(k in clean_line for k in ["[#", "ETA:", "Download Speed:", "CN:", "SD:"]):
                 console.print(f"[bold green]{escape(clean_line)}[/bold green]")
-            elif "Download complete:" in clean_line or "errorCode=" in clean_line:
-                console.print(f"[bold yellow]{escape(clean_line)}[/bold yellow]")
+            elif "Download complete:" in clean_line:
+                console.print(f"[bold green]{escape(clean_line)}[/bold green]")
 
         process.wait()
 

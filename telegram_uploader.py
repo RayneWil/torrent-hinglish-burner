@@ -1,6 +1,7 @@
 import os
 import sys
 import re
+import time
 import json
 import asyncio
 import subprocess
@@ -117,6 +118,12 @@ def clean_anime_title(filename: str) -> str:
     name = name.strip(" -_")
     return name or Path(filename).stem
 
+def make_text_progress_bar(percentage: float, total_blocks: int = 10) -> str:
+    """Generates a text-based progress bar for Telegram messages (e.g. [█████░░░░░])."""
+    filled = int(round(total_blocks * (percentage / 100)))
+    filled = max(0, min(total_blocks, filled))
+    return "█" * filled + "░" * (total_blocks - filled)
+
 def build_caption(title: str, quality: str, height: int, size_mb: float, duration_str: str) -> str:
     """Builds an attractive HTML caption for Telegram channel post."""
     caption = (
@@ -183,6 +190,64 @@ async def _async_upload_to_telegram(
 
     console.print(f"[bold yellow]📤 Uploading '{clean_title}' ({file_size_mb:.1f} MB) to Telegram...[/bold yellow]")
 
+    # Send initial upload start message to Owner
+    owner_id = config.TELEGRAM_OWNER_ID
+    owner_msg = None
+    if owner_id:
+        try:
+            owner_msg = await client.send_message(
+                owner_id,
+                f"🚀 <b>DSA Subber: Upload Started!</b>\n\n"
+                f"🎬 <b>Title:</b> {clean_title}\n"
+                f"📦 <b>Size:</b> {file_size_mb:.1f} MB\n"
+                f"📺 <b>Resolution:</b> {meta['height']}p ({quality})\n"
+                f"📢 <b>Target Channel:</b> <code>{chat_id}</code>\n\n"
+                f"⏳ <i>Connecting upload stream...</i>",
+                parse_mode="html"
+            )
+            console.print(f"[bold green]📬 Upload notification sent to Owner (ID: {owner_id})[/bold green]")
+        except Exception as e:
+            console.print(f"[dim]⚠️ Notice: Could not send start message to Owner ({owner_id}): {e}[/dim]")
+            console.print("[dim]💡 Hint: Please send /start to your bot in Telegram so it can DM you updates![/dim]")
+
+    last_edit_time = 0.0
+    start_time = time.time()
+
+    async def update_owner_progress(current: int, total: int):
+        nonlocal last_edit_time
+        if not owner_msg or total <= 0:
+            return
+
+        now = time.time()
+        # Edit every 3.5 seconds or on finish to respect Telegram rate limits and avoid FloodWait
+        if now - last_edit_time < 3.5 and current < total:
+            return
+
+        last_edit_time = now
+        pct = (current / total) * 100
+        bar = make_text_progress_bar(pct, total_blocks=10)
+        curr_mb = current / (1024 * 1024)
+        tot_mb = total / (1024 * 1024)
+        elapsed = max(0.1, now - start_time)
+        speed_mb = (curr_mb / elapsed)
+        rem_bytes = max(0, total - current)
+        eta_sec = int(rem_bytes / (speed_mb * 1024 * 1024)) if speed_mb > 0 else 0
+        eta_str = f"{eta_sec}s" if eta_sec < 60 else f"{eta_sec // 60}m {eta_sec % 60}s"
+
+        text = (
+            f"📤 <b>Uploading Video to Channel:</b>\n"
+            f"🎬 <b>{clean_title}</b>\n\n"
+            f"<code>[{bar}]</code> <b>{pct:.1f}%</b>\n"
+            f"📦 <b>Uploaded:</b> {curr_mb:.1f} / {tot_mb:.1f} MB\n"
+            f"⚡ <b>Speed:</b> {speed_mb:.2f} MB/s\n"
+            f"⏱️ <b>ETA:</b> {eta_str}\n\n"
+            f"📢 <i>Target: {chat_id}</i>"
+        )
+        try:
+            await owner_msg.edit(text, parse_mode="html")
+        except Exception:
+            pass
+
     with Progress(
         SpinnerColumn(),
         TextColumn("[bold cyan]{task.description}"),
@@ -196,6 +261,12 @@ async def _async_upload_to_telegram(
 
         def progress_callback(current, total):
             progress.update(task, completed=current, total=total)
+            if owner_msg:
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(update_owner_progress(current, total))
+                except Exception:
+                    pass
 
         try:
             await client.send_file(
@@ -213,6 +284,21 @@ async def _async_upload_to_telegram(
             console.print(f"[bold red]❌ Video upload failed: {e}[/bold red]")
             await client.disconnect()
             return False
+
+    # Send final success status to Owner
+    if owner_msg:
+        try:
+            await owner_msg.edit(
+                f"🎉 <b>Video Upload Complete!</b>\n\n"
+                f"🎬 <b>Title:</b> {clean_title}\n"
+                f"📦 <b>Size:</b> {file_size_mb:.1f} MB\n"
+                f"⏱️ <b>Duration:</b> {duration_str}\n"
+                f"📺 <b>Resolution:</b> {meta['height']}p ({quality})\n\n"
+                f"✅ <i>Successfully published to Channel: {chat_id}</i>",
+                parse_mode="html"
+            )
+        except Exception:
+            pass
 
     # Optional: Also upload the .ass subtitle file
     if config.TELEGRAM_UPLOAD_SUBTITLE and sub_path and sub_path.exists():
@@ -257,3 +343,35 @@ def upload_to_telegram(
     except Exception as e:
         console.print(f"[bold red]❌ Telegram Uploader encountered an error: {e}[/bold red]")
         return False
+
+def send_pipeline_start_notification(task_info: str) -> None:
+    """Sends a notification to Owner ID when anime downloading/burning begins."""
+    owner_id = config.TELEGRAM_OWNER_ID
+    if not owner_id or not config.TELEGRAM_AUTO_UPLOAD:
+        return
+
+    async def _notify():
+        ensure_telethon_installed()
+        from telethon import TelegramClient
+        session_path = str(config.TEMP_DIR / "dsa_notify_session")
+        client = TelegramClient(session_path, config.TELEGRAM_API_ID, config.TELEGRAM_API_HASH)
+        try:
+            await client.start(bot_token=config.TELEGRAM_BOT_TOKEN)
+            short_task = clean_anime_title(task_info[:60])
+            await client.send_message(
+                owner_id,
+                f"🔥 <b>DSA Subber: Pipeline Started!</b>\n\n"
+                f"🎬 <b>Task:</b> {short_task}\n"
+                f"⚙️ <b>Status:</b> Downloading & Translating...\n\n"
+                f"<i>Upload progress bar will appear here once burning finishes! 🚀</i>",
+                parse_mode="html"
+            )
+        except Exception:
+            pass
+        finally:
+            await client.disconnect()
+
+    try:
+        asyncio.run(_notify())
+    except Exception:
+        pass

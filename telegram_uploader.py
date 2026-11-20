@@ -476,6 +476,11 @@ async def _async_upload_to_telegram(
     ]
 
     console.print(f"[bold yellow]📤 Uploading '{eng_title}' ({file_size_mb:.1f} MB) to Telegram...[/bold yellow]")
+    try:
+        from notifier import notifier
+        notifier.start_upload(eng_title, file_size_mb)
+    except Exception:
+        pass
 
     # Send initial upload start message to Owner
     owner_id = config.TELEGRAM_OWNER_ID
@@ -548,6 +553,18 @@ async def _async_upload_to_telegram(
 
         def progress_callback(current, total):
             progress.update(task, completed=current, total=total)
+            if total > 0:
+                pct = (current / total) * 100
+                curr_mb = current / (1024 * 1024)
+                tot_mb = total / (1024 * 1024)
+                elapsed = max(0.1, time.time() - start_time)
+                speed_mb = curr_mb / elapsed
+                try:
+                    from notifier import notifier
+                    notifier.update_upload_progress(percent=pct, speed_str=f"{speed_mb:.1f} MB/s", uploaded_mb=curr_mb, total_mb=tot_mb)
+                except Exception:
+                    pass
+
             if owner_msg:
                 try:
                     loop = asyncio.get_running_loop()
@@ -573,6 +590,11 @@ async def _async_upload_to_telegram(
                 supports_streaming=True
             )
             console.print(f"[bold green]🎉 Video successfully uploaded to Telegram Channel: {chat_id}![/bold green]")
+            try:
+                from notifier import notifier
+                notifier.finish_upload(eng_title, channel_title=str(chat_id))
+            except Exception:
+                pass
         except Exception as e:
             console.print(f"[bold red]❌ Video upload failed: {e}[/bold red]")
             await client.disconnect()
@@ -637,34 +659,10 @@ def upload_to_telegram(
         console.print(f"[bold red]❌ Telegram Uploader encountered an error: {e}[/bold red]")
         return False
 
-def send_pipeline_start_notification(task_info: str) -> None:
-    """Sends a notification to Owner ID when anime downloading/burning begins."""
-    owner_id = config.TELEGRAM_OWNER_ID
-    if not owner_id or not config.TELEGRAM_AUTO_UPLOAD:
-        return
-
-    async def _notify():
-        ensure_telethon_installed()
-        from telethon import TelegramClient
-        session_path = str(config.TEMP_DIR / "dsa_notify_session")
-        client = TelegramClient(session_path, config.TELEGRAM_API_ID, config.TELEGRAM_API_HASH)
-        try:
-            await client.start(bot_token=config.TELEGRAM_BOT_TOKEN)
-            short_task = clean_anime_title(task_info[:60])
-            await client.send_message(
-                owner_id,
-                f"🔥 <b>DSA Subber: Pipeline Started!</b>\n\n"
-                f"🎬 <b>Task:</b> {short_task}\n"
-                f"⚙️ <b>Status:</b> Downloading & Translating...\n\n"
-                f"<i>Upload progress bar will appear here once burning finishes! 🚀</i>",
-                parse_mode="html"
-            )
-        except Exception:
-            pass
-        finally:
-            await client.disconnect()
-
+def send_pipeline_start_notification(task_info: str, quality: str = "720p") -> None:
+    """Initializes the live tracking notification for Owner ID."""
     try:
-        asyncio.run(_notify())
-    except Exception:
-        pass
+        from notifier import notifier
+        notifier.start_pipeline(task_name=task_info, quality=quality)
+    except Exception as e:
+        console.print(f"[dim]⚠️ Could not initialize live tracker: {e}[/dim]")

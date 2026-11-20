@@ -79,15 +79,18 @@ def change_api_keys_menu():
 def select_quality_menu(current_quality: str) -> str:
     show_header()
     console.print(Panel(f"[bold yellow]⚙️ Select Output Quality (Current: {current_quality})[/bold yellow]", border_style="yellow"))
-    console.print("[1] 720p (High Definition - Recommended for PC & Mobile)")
-    console.print("[2] 480p (Standard Definition - Fast & Low File Size)")
-    console.print("[3] Keep Current")
+    console.print("[1] 1080p (Full High Definition - Crisp Quality, Best for Large Screens & PC)")
+    console.print("[2] 720p (High Definition - Recommended for PC & Mobile)")
+    console.print("[3] 480p (Standard Definition - Fast & Low File Size)")
+    console.print("[4] Keep Current")
 
     try:
-        choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3"], default="3")
+        choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3", "4"], default="4")
         if choice == "1":
-            return "720p"
+            return "1080p"
         elif choice == "2":
+            return "720p"
+        elif choice == "3":
             return "480p"
     except (EOFError, KeyboardInterrupt):
         pass

@@ -125,6 +125,7 @@ def sync_all_files(token: str, username: Optional[str] = None, repo_name: str = 
         "subtitles.py",
         "translator.py",
         "encoder.py",
+        "notifier.py",
         "telegram_uploader.py",
         "cli.py",
         "ui.py",

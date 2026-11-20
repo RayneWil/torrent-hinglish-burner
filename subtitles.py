@@ -153,18 +153,24 @@ def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSA
 
 def inject_watermark_into_file(file_path: Path):
     """
-    Post-processes the .ass file according to resolution:
-    - 384x288:   Style SD, \\fs13\\pos(380,5)
-    - 640x360:   Style SD, \\fs16\\pos(630,5)
-    - 1280x720:  Style HD, \\fs32\\pos(1260,10)
-    - 1920x1080: Style HD, \\fs42\\pos(1900,10)
+    Post-processes the .ass file ensuring:
+    - Style: Info & Style: WatermarkTop are placed ONE LINE BELOW ALL STYLES (at the end of [V4+ Styles]).
+    - Watermark dialogues are placed ONE LINE BELOW ALL DIALOGUES (at the very end of [Events]).
+    - Resolution is preserved or matched correctly.
     """
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
             content = f.read()
 
-        rx_match = re.search(r"PlayResX:\s*(\d+)", content)
-        ry_match = re.search(r"PlayResY:\s*(\d+)", content)
+        # Remove existing watermark lines to prevent duplicates
+        lines = [
+            l for l in content.splitlines()
+            if not ("Style: WatermarkTop" in l or "Style: Info" in l or "DarkSoulAcademy" in l)
+        ]
+
+        full_text = "\n".join(lines)
+        rx_match = re.search(r"PlayResX:\s*(\d+)", full_text)
+        ry_match = re.search(r"PlayResY:\s*(\d+)", full_text)
         rx = int(rx_match.group(1)) if rx_match else None
         ry = int(ry_match.group(1)) if ry_match else None
 
@@ -186,7 +192,6 @@ def inject_watermark_into_file(file_path: Path):
             pos_x, pos_y, fs = 1900, 10, 42
             target_styles = STYLES_HD
         else:
-            # Fallback based on scale / aspect ratio
             if rx and ry:
                 if rx >= 1920 or ry >= 1080:
                     target_rx, target_ry = 1920, 1080
@@ -209,41 +214,59 @@ def inject_watermark_into_file(file_path: Path):
                 pos_x, pos_y, fs = 1260, 10, 32
                 target_styles = STYLES_HD
 
-        # Update or set PlayResX & PlayResY
-        if "PlayResX:" in content:
-            content = re.sub(r"PlayResX:\s*\d+", f"PlayResX: {target_rx}", content)
+        # Update PlayResX / PlayResY in lines
+        has_rx = False
+        has_ry = False
+        for i, line in enumerate(lines):
+            if line.startswith("PlayResX:"):
+                lines[i] = f"PlayResX: {target_rx}"
+                has_rx = True
+            elif line.startswith("PlayResY:"):
+                lines[i] = f"PlayResY: {target_ry}"
+                has_ry = True
+
+        if not has_rx or not has_ry:
+            for i, line in enumerate(lines):
+                if "[Script Info]" in line:
+                    if not has_rx:
+                        lines.insert(i + 1, f"PlayResX: {target_rx}")
+                    if not has_ry:
+                        lines.insert(i + 2, f"PlayResY: {target_ry}")
+                    break
+
+        # 1. Place styles ONE LINE BELOW ALL EXISTING STYLES (at the end of [V4+ Styles])
+        last_style_idx = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith("Style:"):
+                last_style_idx = i
+
+        if last_style_idx != -1:
+            for st in reversed(target_styles):
+                lines.insert(last_style_idx + 1, st)
         else:
-            content = content.replace("[Script Info]\n", f"[Script Info]\nPlayResX: {target_rx}\n")
+            for i, line in enumerate(lines):
+                if "[V4+ Styles]" in line:
+                    for st in reversed(target_styles):
+                        lines.insert(i + 2, st)
+                    break
 
-        if "PlayResY:" in content:
-            content = re.sub(r"PlayResY:\s*\d+", f"PlayResY: {target_ry}", content)
+        # 2. Place watermark dialogues ONE LINE BELOW ALL EXISTING DIALOGUES (at the very end of [Events])
+        last_dialogue_idx = -1
+        for i, line in enumerate(lines):
+            if line.strip().startswith("Dialogue:"):
+                last_dialogue_idx = i
+
+        wm_events = get_watermark_events(pos_x, pos_y, fs)
+        if last_dialogue_idx != -1:
+            for ev in reversed(wm_events):
+                lines.insert(last_dialogue_idx + 1, ev)
         else:
-            content = content.replace("[Script Info]\n", f"[Script Info]\nPlayResY: {target_ry}\n")
-
-        # Inject Watermark styles under [V4+ Styles] Format: ...
-        if "Style: WatermarkTop" not in content:
-            style_block = "\n".join(target_styles) + "\n"
-            content = re.sub(
-                r"(\[V4\+ Styles\]\s*\nFormat:[^\n]*\n)",
-                lambda m: m.group(1) + style_block,
-                content,
-                count=1
-            )
-
-        # Inject Watermark dialogues under [Events] Format: ...
-        if "DarkSoulAcademy" not in content:
-            events_block = "\n".join(get_watermark_events(pos_x, pos_y, fs)) + "\n"
-            content = re.sub(
-                r"(\[Events\]\s*\nFormat:[^\n]*\n)",
-                lambda m: m.group(1) + events_block,
-                content,
-                count=1
-            )
+            lines.extend(wm_events)
 
         with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
+            f.write("\n".join(lines) + "\n")
 
-        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},{pos_y}), fs{fs}) successfully![/bold green]")
+        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},{pos_y}), fs{fs}) at end of styles & dialogues![/bold green]")
     except Exception as e:
         console.print(f"[bold yellow]⚠️ Watermark injection warning: {e}[/bold yellow]")
 

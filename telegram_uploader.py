@@ -113,37 +113,53 @@ def format_duration(seconds: int) -> str:
 def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
     """
     Extracts (clean_title, season, episode) from typical anime filenames.
-    e.g. '[SubsPlease] Sousou no Frieren - 08 (720p).mkv' -> ('Sousou no Frieren', 1, 8)
+    e.g. '[SubsPlease] Sousou no Frieren - 08 (720p)_Hinglish_720p.mp4' -> ('Sousou no Frieren', 1, 8)
+         '[Erai-raws] FX Fighter Kurumi-chan - 08 [720p].mkv' -> ('FX Fighter Kurumi-chan', 1, 8)
+         'Jujutsu Kaisen S02E14 [1080p].mkv' -> ('Jujutsu Kaisen', 2, 14)
     """
     name = Path(filename).stem
+    # Remove _Hinglish and anything after it (like _720p, _480p)
     name = re.sub(r"_Hinglish.*$", "", name, flags=re.IGNORECASE)
+    # Remove release group [Group]
     name = re.sub(r"^\[.*?\]\s*", "", name)
+    # Remove any brackets containing resolution/codec like [720p][AAC]
     name = re.sub(r"\[.*?\]", "", name)
+    # Remove parentheses containing resolution like (720p)
     name = re.sub(r"\(.*?\)", "", name)
     name = name.strip()
 
     season = 1
     episode = 1
 
-    s_match = re.search(r"[Ss](\d+)\s*[-_ ]*[Ee](\d+)", name)
-    if s_match:
-        season = int(s_match.group(1))
-        episode = int(s_match.group(2))
-        clean_name = re.sub(r"[Ss]\d+\s*[-_ ]*[Ee]\d+.*$", "", name)
+    # Check for S01E08, S1E8, S01 - E08, etc.
+    s_e_match = re.search(r"[Ss](\d+)\s*[-_ ]*[Ee](\d+)", name)
+    if s_e_match:
+        season = int(s_e_match.group(1))
+        episode = int(s_e_match.group(2))
+        clean_name = name[:s_e_match.start()]
     else:
-        s_only = re.search(r"(?:Season\s*|S)(\d+)", name, re.IGNORECASE)
-        if s_only:
-            season = int(s_only.group(1))
-            name = re.sub(r"(?:Season\s*|S)\d+", "", name, flags=re.IGNORECASE)
+        # Check for Season 2, S2
+        s_match = re.search(r"(?:Season|S)\s*(\d+)", name, re.IGNORECASE)
+        if s_match:
+            season = int(s_match.group(1))
+            name = name[:s_match.start()] + name[s_match.end():]
 
-        ep_match = re.search(r"[-_ ]+(?:EP|Ep|Episode)?\s*(\d+)(?:\s|$)", name)
+        # Check for episode number e.g. - 08, EP08, Ep 8, or trailing digits
+        ep_match = re.search(r"(?:[-_ ]+(?:EP|Ep|Episode)?\s*|^)(\d{1,4})(?:\s*v\d+)?(?:\s*[-_ ]|$)", name)
         if ep_match:
             episode = int(ep_match.group(1))
-            clean_name = name[:ep_match.start()]
+            clean_name = name[:ep_match.start()] + name[ep_match.end():]
         else:
-            clean_name = name
+            # Fallback regex for any number after a dash
+            dash_ep = re.search(r"[-_ ]+(\d{1,4})(?:\s*v\d+)?(?:\s|$)", name)
+            if dash_ep:
+                episode = int(dash_ep.group(1))
+                clean_name = name[:dash_ep.start()]
+            else:
+                clean_name = name
 
-    clean_name = clean_name.strip(" -_.")
+    # Clean up trailing dashes/spaces
+    clean_name = re.sub(r"[-_ ]+$", "", clean_name).strip(" -_.")
     return clean_name or Path(filename).stem, season, episode
 
 ANILIST_GRAPHQL_QUERY = """
@@ -263,45 +279,29 @@ def build_caption(
     title: str,
     quality: str,
     season: int = 1,
-    episode: int = 1,
-    genres: str = "Animation, Comedy",
-    style: str = "style2"
+    episode: int = 1
 ) -> str:
     """
-    Builds customized HTML caption for Telegram channel post.
-    Supports both Style 1 (Boxed with Genres) and Style 2 (Compact Dashed).
-    All text is bold, and title row uses Telegram <blockquote> quote styling.
+    Builds the exact customized HTML caption for Telegram channel post:
+    - Title row formatted in Telegram <blockquote> quote styling
+    - Exact quality burned (e.g. 720P)
+    - 2-digit Season and Episode
+    - All text formatted in bold
+    - Powered by link to @DarkSoulAcademy
     """
     clean_q = quality.upper()
     if not clean_q.endswith("P"):
         clean_q += "P"
 
-    if style == "style1":
-        caption = (
-            f"<blockquote><b>〄 {title} •</b></blockquote>\n"
-            f"<b>╭━━━━━━━━━━━━━━━━━━━━━</b>\n"
-            f"<b>➣ Season: {season:02d}</b>\n"
-            f"<b>➣ Episodes: {episode:02d} [ Latest Episode ]</b>\n"
-            f"<b>➣ Genres : {genres}</b>\n"
-            f"<b>➣ Audio: Japanese</b>\n"
-            f"<b>➣ Quality: {clean_q} [Hindi Sub]</b>\n"
-            f"<b>╰━━━━━━━━━━━━━━━━━━━━━</b>\n"
-            f"<b>╭━━━━━━━━━━━━━━━━━╮</b>\n"
-            f"<b>🔥 ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦ 🔥</b>\n"
-            f"<b>╰━━━━━━━━━━━━━━━━━╯</b>"
-        )
-    else:
-        # Default Style 2 (Compact Dashed)
-        caption = (
-            f"<blockquote><b>» {title} •</b></blockquote>\n"
-            f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
-            f"<b>‣ Language: Jap (Hindi Sub)</b>\n"
-            f"<b>‣ Quality: {clean_q}</b>\n"
-            f"<b>‣ Season: {season:02d} | ‣ EP - {episode:02d}</b>\n"
-            f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
-            f"<b>» Powered by ~ ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦</b>"
-        )
-
+    caption = (
+        f"<blockquote><b>» {title} •</b></blockquote>\n"
+        f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+        f"<b>‣ Language: Jap (Hindi Sub)</b>\n"
+        f"<b>‣ Quality: {clean_q}</b>\n"
+        f"<b>‣ Season: {season:02d} | ‣ EP - {episode:02d}</b>\n"
+        f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+        f"<b>» Powered by ~ ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦</b>"
+    )
     return caption
 
 async def fast_upload_file(
@@ -440,14 +440,11 @@ async def _async_upload_to_telegram(
     )
     console.print(f"[bold green]✨ Identified Anime: {eng_title} (S{season:02d}E{episode:02d})[/bold green]")
 
-    caption_style = getattr(config, "TELEGRAM_CAPTION_STYLE", "style2")
     caption = build_caption(
         title=eng_title,
         quality=quality,
         season=season,
-        episode=episode,
-        genres=genres,
-        style=caption_style
+        episode=episode
     )
 
     # Use HD Anime Poster thumbnail if available, otherwise fallback to video frame

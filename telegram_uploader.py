@@ -272,10 +272,46 @@ def get_ordinal(n: int) -> str:
     return f"{n}th"
 
 def clean_caption_title(title: str) -> str:
-    """Removes redundant trailing season numbers or suffixes so caption title stays clean."""
+    """
+    Ensures caption title contains ONLY the pure anime title:
+    Strips out:
+      - Release years e.g. (2024), [2024], 2024, (1989)
+      - Seasons e.g. Season 2, 3rd Season, S02, S2, Part 2, Cour 2, II, III
+      - Episodes e.g. S01E08, EP 01, Ep. 01, Episode 01, E01, - 01
+      - Redundant trailing colons, dashes, dots, spaces
+    """
     t = title.strip()
-    t = re.sub(r'[\s\-_]+(?:Season\s*\d+|\d+(?:st|nd|rd|th)\s+Season|S\d+)\b', '', t, flags=re.IGNORECASE)
-    t = re.sub(r'[\s\-:.]+$', '', t).strip()
+
+    # 1. Remove S01E08, S1E8, S02-E01, etc.
+    t = re.sub(r'[\s\-_]+[Ss]\d+[\s\-_]*[Ee]\d+\b', '', t)
+
+    # 2. Remove Season markers: Season 2, 3rd Season, S02, Season 02, 2nd Season, etc.
+    t = re.sub(r'[\s\-_]+(?:(\d+)(?:st|nd|rd|th)\s+Season|Season\s*\d+|S\d+)\b', '', t, flags=re.IGNORECASE)
+
+    # 3. Remove Roman numeral season markers at the end: II, III, IV, etc.
+    t = re.sub(r'[\s\-_]+(?:I|II|III|IV|V|VI|VII|VIII|IX|X)\b$', '', t)
+
+    # 4. Remove Part / Cour markers: Part 1, Part 2, Cour 1, Cour 2 (except Ranma)
+    if 'ranma' not in t.lower():
+        t = re.sub(r'[\s\-_]+(?:Part|Cour)\s*\d+\b', '', t, flags=re.IGNORECASE)
+
+    # 5. Remove Episode markers: EP 01, Ep. 01, Episode 01, E01, - 01, etc.
+    t = re.sub(r'[\s\-_]+(?:(?:EP|Ep|Episode|E)\s*\.?\s*\d+)\b', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'[\s\-_]+[-–]\s*\d+\b', '', t)
+    t = re.sub(r'[\s\-_]+#\d+\b', '', t)
+
+    # 6. Remove 4-digit release year in parentheses, brackets, or standalone: (2024), [2024], (1989)
+    t = re.sub(r'[\s\-_]*[\(\[]\s*(?:19\d\d|20\d\d)\s*[\)\]]', '', t)
+    t = re.sub(r'[\s\-_]+\b(?:19\d\d|20\d\d)\b', '', t)
+
+    # 7. Remove any remaining trailing standalone episode number e.g. ' - 01' or ' 01'
+    t = re.sub(r'[\s\-_]+(?:\d{1,4})$', '', t)
+
+    # 8. If title ended with '1/2' without spaces like 'Ranma1/2', format nicely to 'Ranma 1/2'
+    t = re.sub(r'(\w)1/2\b', r'\1 1/2', t)
+
+    # 9. Strip trailing punctuation, colons, dashes, dots, spaces
+    t = re.sub(r'[\s\-:._]+$', '', t).strip()
     return t
 
 ANILIST_GRAPHQL_QUERY = """
@@ -590,9 +626,9 @@ def build_caption(
 ) -> str:
     """
     Builds the exact customized HTML caption for Telegram channel post:
-    - Title row formatted in Telegram <blockquote> quote styling
+    - Pure anime title row (NO release year, NO season, NO episode in title)
     - Exact quality burned (e.g. 720P)
-    - 2-digit Season and Episode
+    - 2-digit Season and Episode on dedicated season row
     - All text formatted in bold
     - Powered by link to @DarkSoulAcademy
     """
@@ -600,8 +636,10 @@ def build_caption(
     if not clean_q.endswith("P"):
         clean_q += "P"
 
+    pure_title = clean_caption_title(title)
+
     caption = (
-        f"<b>» {title} •</b>\n"
+        f"<b>» {pure_title} •</b>\n"
         f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
         f"<b>‣ Language: Jap (Hindi Sub)</b>\n"
         f"<b>‣ Quality: {clean_q}</b>\n"

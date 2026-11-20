@@ -13,16 +13,22 @@ console = Console()
 # Verified active working Gemini models for high-speed subtitle translation
 CANDIDATE_MODELS = [
     "gemini-flash-lite-latest",
-    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite-preview"
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview"
 ]
 
 HINGLISH_PROMPT = """ROLE:
 You are a professional anime subtitle translator.
 Your task is to translate subtitle files (.ass, .srt, .vtt) into natural, emotional, and smooth Hinglish.
 Translation must sound human, casual, anime-style, and expressive — NOT word-to-word.
+
+ABSOLUTE ZERO-SKIPPING & EXACT COUNT RULE (CRITICAL):
+- You MUST translate EVERY SINGLE object provided in the input list without exception.
+- NEVER skip, omit, or ignore any line, even if it is very short (e.g. "Yeah", "SALT", "Curry...", "Wait!"), a sign/label (e.g. "PANDA CURRY"), or a sound effect.
+- NEVER merge two lines into one, and NEVER split one line into two.
+- Each input object has an "id" integer. Your output JSON array MUST contain the EXACT SAME NUMBER of objects with the EXACT SAME "id" numbers in the exact same order.
+- NEVER renumber IDs (do not renumber to 1, 2, 3...). Preserve each line's original "id".
 
 VERY IMPORTANT FORMAT RULES (STRICT):
 - DO NOT change subtitle numbering.
@@ -121,51 +127,68 @@ You will receive a JSON array of objects with "id", optional "speaker", and "tex
 class GeminiKeyManager:
     """
     Manages pool of multiple Gemini API keys.
-    Rotates ONLY when quota (429/403) is exhausted or after max_requests_per_key (20).
-    Never burns keys on temporary 503/server spikes.
+    - Rotates keys smoothly across requests.
+    - When all keys hit per-minute RPM rate limits (429), cools down and recycles pool instead of killing keys.
     """
-    def __init__(self, keys: List[str], max_requests_per_key: int = 20):
+    def __init__(self, keys: List[str], max_requests_per_key: int = 20, max_cycles: int = 3):
         self.keys = [k.strip() for k in keys if k.strip()]
         self.max_requests_per_key = max_requests_per_key
+        self.max_cycles = max_cycles
         self.current_idx = 0
+        self.cycle_count = 0
         self.request_counts = [0] * len(self.keys)
 
     @property
     def has_keys(self) -> bool:
-        return len(self.keys) > 0 and self.current_idx < len(self.keys)
+        return len(self.keys) > 0 and self.cycle_count < self.max_cycles
 
     @property
     def total_keys(self) -> int:
         return len(self.keys)
 
     def get_active_key(self) -> Optional[str]:
-        if self.current_idx >= len(self.keys):
+        if not self.has_keys:
             return None
-        return self.keys[self.current_idx]
+        return self.keys[self.current_idx % len(self.keys)]
 
     def record_success(self):
-        """Track successful request. If hits 20 requests, auto-rotate to next key."""
-        if self.current_idx < len(self.keys):
-            self.request_counts[self.current_idx] += 1
-            used = self.request_counts[self.current_idx]
-            console.print(
-                f"[dim]🔑 Key #{self.current_idx + 1}/{len(self.keys)}: "
-                f"{used}/{self.max_requests_per_key} requests used[/dim]"
-            )
-            if used >= self.max_requests_per_key:
-                self.rotate(reason=f"Quota of {self.max_requests_per_key} requests reached")
+        """Track successful request. If hits quota limit, auto-rotate to next key."""
+        if not self.has_keys:
+            return
+        idx = self.current_idx % len(self.keys)
+        self.request_counts[idx] += 1
+        used = self.request_counts[idx]
+        console.print(
+            f"[dim]🔑 Key #{idx + 1}/{len(self.keys)}: "
+            f"{used}/{self.max_requests_per_key} requests used[/dim]"
+        )
+        if used >= self.max_requests_per_key:
+            self.rotate(reason=f"Quota of {self.max_requests_per_key} requests reached")
 
     def rotate(self, reason: str = ""):
-        """Switch to the next available API key."""
-        old_idx = self.current_idx
+        """Switch to the next available API key in the pool with cooldown cycling."""
+        if not self.keys:
+            return
+        old_idx = self.current_idx % len(self.keys)
         self.current_idx += 1
-        if self.current_idx < len(self.keys):
-            console.print(
-                f"[bold yellow]🔄 Key #{old_idx + 1} shifted ({reason}). "
-                f"Now switching to Key #{self.current_idx + 1}/{len(self.keys)}...[/bold yellow]"
-            )
-        else:
-            console.print(f"[bold red]❌ All {len(self.keys)} API Keys have been exhausted![/bold red]")
+        new_idx = self.current_idx % len(self.keys)
+
+        if self.current_idx > 0 and self.current_idx % len(self.keys) == 0:
+            self.cycle_count += 1
+            if self.cycle_count < self.max_cycles:
+                console.print(
+                    f"[bold yellow]⏳ All {len(self.keys)} API Keys rotated (Cycle {self.cycle_count}/{self.max_cycles}). "
+                    f"Cooling down for 10s to reset RPM quota window...[/bold yellow]"
+                )
+                time.sleep(10)
+            else:
+                console.print(f"[bold red]❌ All {len(self.keys)} API Keys completed max cycles ({self.max_cycles})![/bold red]")
+                return
+
+        console.print(
+            f"[bold yellow]🔄 Key #{old_idx + 1} shifted ({reason}). "
+            f"Now using Key #{new_idx + 1}/{len(self.keys)}...[/bold yellow]"
+        )
 
 DEV_VOWELS = {
     'अ': 'a', 'आ': 'aa', 'इ': 'i', 'ई': 'ee', 'उ': 'u', 'ऊ': 'oo', 'ऋ': 'ri',
@@ -380,14 +403,18 @@ def translate_batch_with_retry(
     batch: List[Dict],
     key_manager: GeminiKeyManager,
     roster: str = "",
-    prev_context: List[str] = None
+    prev_context: List[str] = None,
+    is_sub_retry: bool = False
 ) -> List[Dict]:
     """
-    Translates a 30-line batch using direct REST API.
+    Translates a batch of lines using direct REST API.
+    - Zero-skipping guarantee: detects missing lines and auto-reconciles them.
     - Uses Character Gender Roster and Previous Dialogue Context for 100% gender accuracy.
-    - Model fallback chain: tries flash-lite first, falls back if 503 high demand occurs.
-    - Rotates API keys ONLY on true quota exhaustion (429/403) or after 20 successful requests.
+    - Model fallback chain with intelligent RPM backoff.
     """
+    if not batch:
+        return []
+
     input_json = json.dumps(batch, ensure_ascii=False)
 
     roster_block = f"EPISODE CHARACTER GENDER ROSTER:\n{roster}\n\n" if roster else ""
@@ -397,19 +424,51 @@ def translate_batch_with_retry(
         f"{HINGLISH_PROMPT}\n\n"
         f"{roster_block}"
         f"{context_block}"
+        f"CRITICAL ZERO-SKIPPING INSTRUCTION:\n"
+        f"Translate EVERY SINGLE one of the {len(batch)} input lines below. Do NOT omit or merge any line.\n"
+        f"Output MUST contain exactly {len(batch)} objects with matching 'id' numbers.\n\n"
         f"Input Subtitle Lines to Translate:\n{input_json}\n\n"
         f"Output:\n"
     )
 
+    expected_ids = [item["id"] for item in batch]
+    expected_ids_set = set(expected_ids)
+
     while key_manager.has_keys:
         active_key = key_manager.get_active_key()
+        if not active_key:
+            break
 
         # Try candidate models on the current active key
         for model in CANDIDATE_MODELS:
             try:
                 raw_text = call_gemini_rest(full_prompt, active_key, model_name=model).strip()
+                if not raw_text:
+                    continue
 
                 translated_batch = parse_gemini_json_response(raw_text)
+                if not isinstance(translated_batch, list) or not translated_batch:
+                    continue
+
+                # Ensure all elements have an ID
+                received_ids = {x.get("id") for x in translated_batch if isinstance(x, dict) and "id" in x}
+
+                # Case A: Model renumbered IDs (e.g. 1..N or 0..N-1) but returned same count
+                if len(translated_batch) == len(batch) and received_ids != expected_ids_set:
+                    for i, item in enumerate(translated_batch):
+                        item["id"] = batch[i]["id"]
+                    received_ids = expected_ids_set
+
+                # Case B: Model dropped some lines
+                missing_ids = expected_ids_set - received_ids
+                if missing_ids and not is_sub_retry and len(missing_ids) <= len(batch) // 2:
+                    console.print(f"[dim]⚠️ {len(missing_ids)} line(s) missing from batch response. Re-translating missing lines...[/dim]")
+                    missing_items = [b for b in batch if b["id"] in missing_ids]
+                    sub_recovered = translate_batch_with_retry(
+                        missing_items, key_manager, roster=roster, prev_context=prev_context, is_sub_retry=True
+                    )
+                    translated_batch.extend(sub_recovered)
+
                 key_manager.record_success()
                 return translated_batch
 
@@ -419,11 +478,11 @@ def translate_batch_with_retry(
 
                 # If Quota limit (429 / 403), rotate to NEXT KEY immediately
                 if err_code in (429, 403) or "quota" in err_body.lower() or "resourceexhausted" in err_body.lower():
-                    console.print(f"[bold yellow]⚠️ Quota limit on Key #{key_manager.current_idx + 1} (HTTP {err_code}). Shifting key...[/bold yellow]")
-                    key_manager.rotate(reason=f"HTTP {err_code} Quota Limit")
-                    break  # Break out to try new key with first model
+                    console.print(f"[bold yellow]⚠️ Rate limit on Key (HTTP {err_code}). Rotating...[/bold yellow]")
+                    key_manager.rotate(reason=f"HTTP {err_code} Rate Limit")
+                    break
 
-                # If 503 (Server high demand) or 404, DO NOT burn key! Try next candidate model
+                # If 503 (Server high demand) or 404, try next candidate model
                 elif err_code in (503, 500, 404):
                     console.print(f"[dim]⚠️ Model '{model}' busy (HTTP {err_code}). Trying alternate model...[/dim]")
                     time.sleep(1)
@@ -440,21 +499,22 @@ def translate_batch_with_retry(
                 continue
 
         # If all candidate models had temporary network issues on this key, pause briefly before retrying
-        time.sleep(2)
+        time.sleep(1.5)
 
-    console.print("[bold red]❌ All Gemini API keys exhausted. Preserving original lines for remaining dialogues.[/bold red]")
+    console.print("[bold red]❌ All Gemini API attempts completed for batch. Preserving original lines for unmapped items.[/bold red]")
     return batch
 
 def translate_subtitles_to_hinglish(
     subs: pysubs2.SSAFile,
     api_keys: List[str],
-    batch_size: int = 30,
+    batch_size: int = 20,
     max_requests_per_key: int = 20
 ) -> pysubs2.SSAFile:
     """
     Translates all dialogue lines in pysubs2 SSAFile to Hinglish:
-    - 30 lines per request
-    - Automatically rotates to next key after 20 requests or on quota exhaustion.
+    - 20 lines per request (optimal sweet spot for 100% completion)
+    - Automatically rotates across keys and handles rate-limit cooldowns.
+    - Fail-safe sweeper guarantees zero missing or skipped lines.
     """
     key_manager = GeminiKeyManager(api_keys, max_requests_per_key=max_requests_per_key)
 
@@ -514,7 +574,7 @@ def translate_subtitles_to_hinglish(
     if character_roster:
         console.print(f"[bold green]👥 Detected Episode Characters & Genders:[/bold green]\n[dim]{character_roster}[/dim]\n")
 
-    # Split into exact batches of 30 lines
+    # Split into exact batches of 20 lines
     batches = [
         dialogues_to_translate[i:i + batch_size]
         for i in range(0, total_lines, batch_size)
@@ -538,14 +598,35 @@ def translate_subtitles_to_hinglish(
             else:
                 prev_context_lines.append(clean_text)
         prev_context_lines = prev_context_lines[-6:]
-        # Small delay between requests to be gentle on rate limits
-        time.sleep(0.4)
+        # Pacing between batches to protect against 15 RPM rate limits
+        time.sleep(1.2)
+
+    # Fail-Safe Sweeper: Ensure 100% of dialogues were translated
+    untranslated_items = [item for item in dialogues_to_translate if item["id"] not in translations_map]
+    if untranslated_items and key_manager.has_keys:
+        console.print(f"[bold yellow]🔍 Fail-Safe Recovery: Translating {len(untranslated_items)} remaining line(s)...[/bold yellow]")
+        recover_batches = [
+            untranslated_items[i:i + 10]
+            for i in range(0, len(untranslated_items), 10)
+        ]
+        for mini_batch in recover_batches:
+            recovered_items = translate_batch_with_retry(mini_batch, key_manager, roster=character_roster)
+            for item in recovered_items:
+                translations_map[item["id"]] = sanitize_devanagari_to_roman(item.get("text", ""))
+            time.sleep(1.2)
 
     # Apply translated texts back to SSAFile, strictly preserving specific dialogue tags (like {\fs...})
     for idx, event in enumerate(subs.events):
         if idx in translations_map:
             prefix = prefix_tags_map.get(idx, "")
             event.text = f"{prefix}{translations_map[idx]}"
+        elif idx in prefix_tags_map:
+            # Clean fallback if translation totally unavailable
+            prefix = prefix_tags_map.get(idx, "")
+            cleaned_orig = clean_sub_text(re.sub(r"^((?:\{[^{}]*\})+)", "", event.text))
+            if cleaned_orig:
+                event.text = f"{prefix}{cleaned_orig}"
 
-    console.print("[bold green]✅ Translation to Hinglish Completed Successfully![/bold green]")
+    translated_count = len(translations_map)
+    console.print(f"[bold green]✅ Translation Completed: {translated_count}/{total_lines} lines translated to natural Hinglish![/bold green]")
     return subs

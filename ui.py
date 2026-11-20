@@ -129,7 +129,7 @@ def start_burning_workflow(quality: str):
         # Send start notification to Telegram Owner if configured
         try:
             from telegram_uploader import send_pipeline_start_notification
-            send_pipeline_start_notification(torrent_input)
+            send_pipeline_start_notification(torrent_input, quality=quality)
         except Exception:
             pass
 
@@ -240,7 +240,7 @@ def test_telegram_connection():
                             config.TELEGRAM_OWNER_ID,
                             f"👋 <b>Hello Boss! (Owner ID: {config.TELEGRAM_OWNER_ID})</b>\n\n"
                             f"DSA Subber Bot (@{me.username}) is connected to your personal chat!\n"
-                            f"You will receive start alerts and live video upload progress bars here! 🚀",
+                            f"You will receive live work progress tracker cards and milestone alerts for Download, Translation, Encoding, and Upload here! 🚀",
                             parse_mode="html"
                         )
                         console.print(f"[bold green]📬 Test message sent to Owner ({config.TELEGRAM_OWNER_ID}) successfully![/bold green]")

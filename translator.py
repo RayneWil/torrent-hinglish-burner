@@ -73,13 +73,49 @@ Good morning → good morning
 Good night → good night  
 Love → pyaar / love (depending on scene mood)
 
-STRICT RULE MUST FOLLOW:
-Look at the dialogue and understand who is speaking—and to whom—in terms of gender. 
-Ensure that the verb endings (like 'raha hoon' or 'rahi hoon') are consistent with that gender. 
-Maintain this throughout.
+CRITICAL GENDER & VERB ENDING RULES (STRICTEST ACCURACY REQUIRED):
+You MUST determine whether the speaker is MALE or FEMALE for each dialogue line.
+Never guess or default everything blindly to male!
+
+1. FEMALE SPEAKER ("I" / "Mai"):
+   - ALWAYS use feminine verb endings:
+     • 'kar rahi hoon' (NEVER 'kar raha hoon')
+     • 'ja rahi hoon' (NEVER 'ja raha hoon')
+     • 'soch rahi hoon' (NEVER 'soch raha hoon')
+     • 'karungi' / 'jaungi' / 'bataungi' (NEVER 'karunga' / 'jaunga' / 'bataunga')
+     • 'samajh gayi' / 'thak gayi' (NEVER 'gaya')
+     • 'mai theek hoon', 'meri galti hai'
+
+2. MALE SPEAKER ("I" / "Mai"):
+   - ALWAYS use masculine verb endings:
+     • 'kar raha hoon', 'ja raha hoon', 'soch raha hoon'
+     • 'karunga', 'jaunga', 'bataunga'
+     • 'samajh gaya', 'thak gaya'
+
+3. ADDRESSING A FEMALE ("You" / "Tum"):
+   - When talking TO a girl/woman:
+     • 'tum kaisi ho?' (NOT 'kaise ho')
+     • 'tum kya kar rahi ho?' (NOT 'kar rahe ho')
+     • 'tum jaogi?' (NOT 'jaoge')
+
+4. ADDRESSING A MALE ("You" / "Tum"):
+   - When talking TO a boy/man:
+     • 'tum kaise ho?'
+     • 'tum kya kar rahe ho?'
+     • 'tum jaoge?'
+
+5. HOW TO ACCURATELY IDENTIFY GENDER:
+   - Check the "speaker" field if provided in JSON.
+   - Match characters with the EPISODE CHARACTER ROSTER below.
+   - Look for anime cues in dialogue:
+     • "-kun" is used for boys/male peers.
+     • "-chan", "Miss", "Lady", "Onee-san", "Mother", "Sister" indicate female.
+     • "Lord", "Sir", "Aniki", "Onii-san", "Father", "Brother" indicate male.
+   - In female-led conversations, keep consistent feminine grammar throughout.
+   - If gender is completely ambiguous: use natural gender-neutral Hinglish phrasing (e.g. 'Mujhe jaana hai', 'Mera iraada pakka hai') instead of defaulting blindly to masculine!
 
 TECHNICAL FORMAT:
-You will receive a JSON array of objects with "id" and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
+You will receive a JSON array of objects with "id", optional "speaker", and "text". You MUST reply with ONLY a valid JSON array of objects with the exact same "id" and the translated Hinglish "text". Do not include markdown codeblocks or conversational text, just the raw JSON array.
 """
 
 class GeminiKeyManager:
@@ -289,14 +325,81 @@ def parse_gemini_json_response(raw_text: str) -> List[Dict]:
 
     return json.loads(raw_text, strict=False)
 
-def translate_batch_with_retry(batch: List[Dict], key_manager: GeminiKeyManager) -> List[Dict]:
+def extract_character_roster(subs: pysubs2.SSAFile, key_manager: GeminiKeyManager) -> str:
+    """
+    Analyzes subtitle file to identify characters and their genders (Male/Female).
+    Injects this roster into every translation prompt for accurate verb endings.
+    """
+    unique_speakers = set()
+    sample_dialogues = []
+
+    for ev in subs.events:
+        if ev.is_comment:
+            continue
+        name = getattr(ev, "name", "").strip()
+        if name and name.lower() not in ("default", "main", "info", "watermarktop"):
+            clean_name = re.sub(r"\{.*?\}", "", name).strip()
+            if clean_name:
+                unique_speakers.add(clean_name)
+
+        cleaned = clean_sub_text(ev.text)
+        if cleaned and len(cleaned) > 5:
+            prefix = f"{name}: " if name else ""
+            sample_dialogues.append(f"{prefix}{cleaned}")
+        if len(sample_dialogues) >= 60:
+            break
+
+    if not sample_dialogues:
+        return ""
+
+    prompt = (
+        "You are an expert anime localization director.\n"
+        "Analyze these sample subtitles and speaker tags from an anime episode:\n\n"
+        f"Known Speaker Tags: {', '.join(sorted(unique_speakers)) if unique_speakers else 'None'}\n\n"
+        f"Sample Dialogue Lines:\n" + "\n".join(sample_dialogues[:40]) + "\n\n"
+        "TASK:\n"
+        "Identify the main characters appearing in this anime episode and specify their Gender (Male or Female).\n"
+        "Reply with ONLY a concise bullet list in this format:\n"
+        "- [Character Name]: [Male/Female] (Short note e.g. male protagonist / female heroine / teacher / rival)\n"
+    )
+
+    active_key = key_manager.get_active_key()
+    if not active_key:
+        return ""
+
+    try:
+        roster_text = call_gemini_rest(prompt, active_key, model_name=CANDIDATE_MODELS[0]).strip()
+        if roster_text and ("Male" in roster_text or "Female" in roster_text):
+            return roster_text
+    except Exception:
+        pass
+
+    return ""
+
+def translate_batch_with_retry(
+    batch: List[Dict],
+    key_manager: GeminiKeyManager,
+    roster: str = "",
+    prev_context: List[str] = None
+) -> List[Dict]:
     """
     Translates a 30-line batch using direct REST API.
+    - Uses Character Gender Roster and Previous Dialogue Context for 100% gender accuracy.
     - Model fallback chain: tries flash-lite first, falls back if 503 high demand occurs.
     - Rotates API keys ONLY on true quota exhaustion (429/403) or after 20 successful requests.
     """
     input_json = json.dumps(batch, ensure_ascii=False)
-    full_prompt = f"{HINGLISH_PROMPT}\n\nInput:\n{input_json}\n\nOutput:\n"
+
+    roster_block = f"EPISODE CHARACTER GENDER ROSTER:\n{roster}\n\n" if roster else ""
+    context_block = f"RECENT DIALOGUE CONTEXT (for gender/scene reference):\n" + "\n".join(prev_context[-3:]) + "\n\n" if prev_context else ""
+
+    full_prompt = (
+        f"{HINGLISH_PROMPT}\n\n"
+        f"{roster_block}"
+        f"{context_block}"
+        f"Input Subtitle Lines to Translate:\n{input_json}\n\n"
+        f"Output:\n"
+    )
 
     while key_manager.has_keys:
         active_key = key_manager.get_active_key()
@@ -394,10 +497,22 @@ def translate_subtitles_to_hinglish(
         prefix_tags_map[idx] = prefix_tags
         cleaned = clean_sub_text(content_text)
         if cleaned:
-            dialogues_to_translate.append({"id": idx, "text": cleaned})
+            speaker = getattr(event, "name", "").strip()
+            item = {"id": idx, "text": cleaned}
+            if speaker and speaker.lower() not in ("default", "main", "info", "watermarktop"):
+                clean_speaker = re.sub(r"\{.*?\}", "", speaker).strip()
+                if clean_speaker:
+                    item["speaker"] = clean_speaker
+            dialogues_to_translate.append(item)
 
     total_lines = len(dialogues_to_translate)
     console.print(f"[bold cyan]🌐 Translating {total_lines} subtitle lines to Hinglish in batches of {batch_size}...[/bold cyan]")
+
+    # Extract episode character roster to enforce accurate gender conjugations
+    console.print("[bold cyan]🔍 Profiling episode characters and genders for high accuracy...[/bold cyan]")
+    character_roster = extract_character_roster(subs, key_manager)
+    if character_roster:
+        console.print(f"[bold green]👥 Detected Episode Characters & Genders:[/bold green]\n[dim]{character_roster}[/dim]\n")
 
     # Split into exact batches of 30 lines
     batches = [
@@ -406,11 +521,23 @@ def translate_subtitles_to_hinglish(
     ]
 
     translations_map = {}
-    for batch in track(batches, description="[green]Translating batches..."):
-        translated_results = translate_batch_with_retry(batch, key_manager)
+    prev_context_lines = []
+    for batch in track(batches, description="[green]Translating batches with gender tracking..."):
+        translated_results = translate_batch_with_retry(
+            batch,
+            key_manager,
+            roster=character_roster,
+            prev_context=prev_context_lines
+        )
         for item in translated_results:
             clean_text = sanitize_devanagari_to_roman(item.get("text", ""))
             translations_map[item["id"]] = clean_text
+            speaker_tag = item.get("speaker", "")
+            if speaker_tag:
+                prev_context_lines.append(f"{speaker_tag}: {clean_text}")
+            else:
+                prev_context_lines.append(clean_text)
+        prev_context_lines = prev_context_lines[-6:]
         # Small delay between requests to be gentle on rate limits
         time.sleep(0.4)
 

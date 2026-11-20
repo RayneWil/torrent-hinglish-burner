@@ -166,4 +166,5 @@ if __name__ == "__main__":
         print("Please provide GITHUB_TOKEN in .env or as CLI arg!")
         sys.exit(1)
 
-    sync_all_files(token)
+    msg = sys.argv[2] if len(sys.argv) > 2 else "Improve subtitle translation gender accuracy with character profiling & contextual tracking"
+    sync_all_files(token, commit_msg=msg)

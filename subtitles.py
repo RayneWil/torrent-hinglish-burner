@@ -39,8 +39,8 @@ def get_info_events(target_rx: int, target_ry: int) -> List[str]:
         ]
     elif target_rx == 640 and target_ry == 360:
         return [
-            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,30)\fs23}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
-            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,55)\fs21}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,30)\fs22}This Anime is Subbed By {\c&H00FFCC66&}DarkSoulAcademy{\c&H00FFFFFF&}!",
+            r"Dialogue: 0,0:00:00.00,0:00:10.00,Info,,0,0,0,,{\fad(0,500)\fnArial Rounded MT Bold\an8\pos(325,55)\fs20}{\c&H0000FFFF&}Telegram Channel{\c&H00FFFFFF&}: @DarkSoulAcademy"
         ]
     elif target_rx == 384 and target_ry == 288:
         return [

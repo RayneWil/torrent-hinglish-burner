@@ -336,6 +336,12 @@ def inject_watermark_into_file(file_path: Path):
 
 def save_ass_subtitles(subs: pysubs2.SSAFile, out_path: Path):
     """Saves the SSAFile and post-processes custom watermark & resolution."""
+    # Ensure zero Devanagari characters before saving
+    from translator import sanitize_devanagari_to_roman
+    for event in subs.events:
+        if not event.is_comment:
+            event.text = sanitize_devanagari_to_roman(event.text)
+
     apply_custom_font_to_all_styles(subs)
     subs.save(str(out_path.resolve()))
     inject_watermark_into_file(out_path)

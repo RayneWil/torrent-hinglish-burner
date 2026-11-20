@@ -4,10 +4,12 @@ Sends live-updating tracker cards and milestone alerts to the Owner Telegram ID
 via official Telegram Bot API (HTTP REST - fast, reliable, zero session conflicts).
 """
 
+import re
 import time
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import Optional
 try:
     from rich.console import Console

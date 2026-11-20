@@ -12,8 +12,8 @@ console = Console()
 
 # Verified active working Gemini models for high-speed subtitle translation
 CANDIDATE_MODELS = [
-    "gemini-flash-lite-latest",
     "gemini-3.5-flash-lite",
+    "gemini-flash-lite-latest",
     "gemini-3.1-flash-lite",
     "gemini-3-flash-preview"
 ]
@@ -302,7 +302,7 @@ def call_gemini_rest(prompt_text: str, api_key: str, model_name: str) -> str:
         data=data_bytes,
         headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=25) as response:
+    with urllib.request.urlopen(req, timeout=35) as response:
         res_json = json.loads(response.read().decode("utf-8"))
         candidates = res_json.get("candidates", [])
         if candidates:
@@ -312,16 +312,21 @@ def call_gemini_rest(prompt_text: str, api_key: str, model_name: str) -> str:
     return ""
 
 def parse_gemini_json_response(raw_text: str) -> List[Dict]:
-    """Robust 3-tier JSON parser for Gemini subtitle outputs."""
+    """Robust multi-tier JSON parser for Gemini subtitle outputs with quote tolerance."""
     raw_text = raw_text.strip()
-    if raw_text.startswith("```"):
-        raw_text = re.sub(r"^```(?:json)?\s*\n?", "", raw_text)
-        raw_text = re.sub(r"\n?```\s*$", "", raw_text)
-    raw_text = raw_text.strip()
+    if "```" in raw_text:
+        match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", raw_text, re.DOTALL)
+        if match:
+            raw_text = match.group(1).strip()
+        else:
+            raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+            raw_text = re.sub(r"\s*```$", "", raw_text).strip()
 
     # Tier 1: Standard JSON parse with non-strict control characters
     try:
-        return json.loads(raw_text, strict=False)
+        res = json.loads(raw_text, strict=False)
+        if isinstance(res, list):
+            return res
     except Exception:
         pass
 
@@ -329,24 +334,43 @@ def parse_gemini_json_response(raw_text: str) -> List[Dict]:
     array_match = re.search(r"\[\s*\{.*\}\s*\]", raw_text, re.DOTALL)
     if array_match:
         try:
-            return json.loads(array_match.group(0), strict=False)
+            res = json.loads(array_match.group(0), strict=False)
+            if isinstance(res, list):
+                return res
         except Exception:
             pass
 
-    # Tier 3: Regex item-by-item extraction for dialogues with quotes
+    # Tier 3: Regex item-by-item extraction resilient to unescaped internal quotes
     items = []
-    pattern = re.compile(r'\{\s*"id"\s*:\s*(\d+)\s*,\s*"text"\s*:\s*"(.*?)"\s*\}', re.DOTALL)
-    for m in pattern.finditer(raw_text):
-        try:
-            item_id = int(m.group(1))
-            item_text = m.group(2).replace('\\"', '"').replace('\n', ' ')
-            items.append({"id": item_id, "text": item_text})
-        except Exception:
+    obj_pattern = re.compile(r'\{[^{}]*"id"\s*:\s*(\d+)[^{}]*\}', re.DOTALL)
+    for m in obj_pattern.finditer(raw_text):
+        chunk = m.group(0)
+        id_m = re.search(r'"id"\s*:\s*(\d+)', chunk)
+        if not id_m:
             continue
+        item_id = int(id_m.group(1))
+
+        text_m = re.search(r'"text"\s*:\s*"(.*)"\s*\}', chunk, re.DOTALL)
+        if text_m:
+            item_text = text_m.group(1).replace('\n', ' ').strip()
+            items.append({"id": item_id, "text": item_text})
+        else:
+            text_m2 = re.search(r'"text"\s*:\s*"(.*?)"', chunk, re.DOTALL)
+            if text_m2:
+                items.append({"id": item_id, "text": text_m2.group(1).strip()})
+
     if items:
         return items
 
-    return json.loads(raw_text, strict=False)
+    # Tier 4: Line fallback regex
+    line_pattern = re.compile(r'["\']?id["\']?\s*:\s*(\d+).*?["\']?text["\']?\s*:\s*["\'](.*?)["\'](?:\s*[,}]|$)', re.DOTALL)
+    for m in line_pattern.finditer(raw_text):
+        try:
+            items.append({"id": int(m.group(1)), "text": m.group(2).strip()})
+        except Exception:
+            continue
+
+    return items
 
 def extract_character_roster(subs: pysubs2.SSAFile, key_manager: GeminiKeyManager) -> str:
     """
@@ -461,13 +485,15 @@ def translate_batch_with_retry(
 
                 # Case B: Model dropped some lines
                 missing_ids = expected_ids_set - received_ids
-                if missing_ids and not is_sub_retry and len(missing_ids) <= len(batch) // 2:
+                if missing_ids and not is_sub_retry:
                     console.print(f"[dim]⚠️ {len(missing_ids)} line(s) missing from batch response. Re-translating missing lines...[/dim]")
                     missing_items = [b for b in batch if b["id"] in missing_ids]
                     sub_recovered = translate_batch_with_retry(
                         missing_items, key_manager, roster=roster, prev_context=prev_context, is_sub_retry=True
                     )
-                    translated_batch.extend(sub_recovered)
+                    for sub_it in sub_recovered:
+                        if isinstance(sub_it, dict) and sub_it.get("id") in missing_ids and sub_it.get("text"):
+                            translated_batch.append(sub_it)
 
                 key_manager.record_success()
                 return translated_batch
@@ -601,19 +627,36 @@ def translate_subtitles_to_hinglish(
         # Pacing between batches to protect against 15 RPM rate limits
         time.sleep(1.2)
 
-    # Fail-Safe Sweeper: Ensure 100% of dialogues were translated
-    untranslated_items = [item for item in dialogues_to_translate if item["id"] not in translations_map]
-    if untranslated_items and key_manager.has_keys:
-        console.print(f"[bold yellow]🔍 Fail-Safe Recovery: Translating {len(untranslated_items)} remaining line(s)...[/bold yellow]")
+    # Fail-Safe Multi-Pass Sweeper: Guarantees 100% of dialogues are translated
+    sweeper_pass = 1
+    while sweeper_pass <= 3:
+        untranslated_items = [item for item in dialogues_to_translate if item["id"] not in translations_map]
+        if not untranslated_items or not key_manager.has_keys:
+            break
+        console.print(f"[bold yellow]🔍 Fail-Safe Pass {sweeper_pass}: Translating {len(untranslated_items)} remaining line(s)...[/bold yellow]")
+        batch_sz = 10 if sweeper_pass == 1 else 5
         recover_batches = [
-            untranslated_items[i:i + 10]
-            for i in range(0, len(untranslated_items), 10)
+            untranslated_items[i:i + batch_sz]
+            for i in range(0, len(untranslated_items), batch_sz)
         ]
         for mini_batch in recover_batches:
             recovered_items = translate_batch_with_retry(mini_batch, key_manager, roster=character_roster)
             for item in recovered_items:
-                translations_map[item["id"]] = sanitize_devanagari_to_roman(item.get("text", ""))
+                if isinstance(item, dict) and item.get("text"):
+                    translations_map[item["id"]] = sanitize_devanagari_to_roman(item["text"])
             time.sleep(1.2)
+        sweeper_pass += 1
+
+    # Final Micro-Pass: If any stubborn individual line is still missing, translate 1-by-1
+    still_missing = [item for item in dialogues_to_translate if item["id"] not in translations_map]
+    if still_missing and key_manager.has_keys:
+        console.print(f"[bold yellow]🔍 Final Micro-Pass: Translating {len(still_missing)} line(s) individually...[/bold yellow]")
+        for single_item in still_missing:
+            res = translate_batch_with_retry([single_item], key_manager, roster=character_roster)
+            for it in res:
+                if isinstance(it, dict) and it.get("text"):
+                    translations_map[it["id"]] = sanitize_devanagari_to_roman(it["text"])
+            time.sleep(1.0)
 
     # Apply translated texts back to SSAFile, strictly preserving specific dialogue tags (like {\fs...})
     for idx, event in enumerate(subs.events):

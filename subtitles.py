@@ -154,9 +154,9 @@ def load_and_style_subtitles(sub_path: Path, font_size: int = 22) -> pysubs2.SSA
 def inject_watermark_into_file(file_path: Path):
     """
     Post-processes the .ass file ensuring:
-    - Style: Info & Style: WatermarkTop are placed ONE LINE BELOW ALL STYLES (at the end of [V4+ Styles]).
-    - Watermark dialogues are placed ONE LINE BELOW ALL DIALOGUES (at the very end of [Events]).
-    - Resolution is preserved or matched correctly.
+    - Style: Info & Style: WatermarkTop are placed 2 LINES BELOW ALL STYLES (separated by a blank line).
+    - Watermark dialogues are placed 2 LINES BELOW ALL DIALOGUES (separated by a blank line).
+    - Clear visual separation so it is easy to find in text editors.
     """
     try:
         with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -234,23 +234,26 @@ def inject_watermark_into_file(file_path: Path):
                         lines.insert(i + 2, f"PlayResY: {target_ry}")
                     break
 
-        # 1. Place styles ONE LINE BELOW ALL EXISTING STYLES (at the end of [V4+ Styles])
+        # 1. Place styles 2 LINES BELOW ALL EXISTING STYLES (leave a blank line before)
         last_style_idx = -1
         for i, line in enumerate(lines):
             if line.strip().startswith("Style:"):
                 last_style_idx = i
 
         if last_style_idx != -1:
-            for st in reversed(target_styles):
+            # Leave a blank line (2 lines below)
+            insert_styles = [""] + target_styles
+            for st in reversed(insert_styles):
                 lines.insert(last_style_idx + 1, st)
         else:
             for i, line in enumerate(lines):
                 if "[V4+ Styles]" in line:
-                    for st in reversed(target_styles):
+                    insert_styles = [""] + target_styles
+                    for st in reversed(insert_styles):
                         lines.insert(i + 2, st)
                     break
 
-        # 2. Place watermark dialogues ONE LINE BELOW ALL EXISTING DIALOGUES (at the very end of [Events])
+        # 2. Place watermark dialogues 2 LINES BELOW ALL EXISTING DIALOGUES (leave a blank line before)
         last_dialogue_idx = -1
         for i, line in enumerate(lines):
             if line.strip().startswith("Dialogue:"):
@@ -258,15 +261,18 @@ def inject_watermark_into_file(file_path: Path):
 
         wm_events = get_watermark_events(pos_x, pos_y, fs)
         if last_dialogue_idx != -1:
-            for ev in reversed(wm_events):
+            # Leave a blank line (2 lines below)
+            insert_events = [""] + wm_events
+            for ev in reversed(insert_events):
                 lines.insert(last_dialogue_idx + 1, ev)
         else:
+            lines.append("")
             lines.extend(wm_events)
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
 
-        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry} -> pos({pos_x},{pos_y}), fs{fs}) at end of styles & dialogues![/bold green]")
+        console.print(f"[bold green]🌟 Injected Custom Watermark ({target_rx}x{target_ry}) 2 lines below styles & dialogues![/bold green]")
     except Exception as e:
         console.print(f"[bold yellow]⚠️ Watermark injection warning: {e}[/bold yellow]")
 

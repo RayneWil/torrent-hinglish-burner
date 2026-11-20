@@ -134,6 +134,8 @@ def apply_custom_font_to_all_styles(subs: pysubs2.SSAFile, font_size: Optional[i
 
     if rx == 1280 and ry == 720:
         target_fontsize = 52
+    elif rx == 640 and ry == 360:
+        target_fontsize = 26
     elif font_size is not None:
         target_fontsize = font_size
     elif rx == 1920 and ry == 1080:
@@ -252,9 +254,17 @@ def inject_watermark_into_file(file_path: Path):
                         lines.insert(i + 2, f"PlayResY: {target_ry}")
                     break
 
-        # If PlayResX: 1280 and PlayResY: 720, set font size to 52 across all subtitle dialogue styles
+        # Determine target subtitle font size based on resolution:
+        # - PlayResX: 1280 | PlayResY: 720 -> font size 52
+        # - PlayResX: 640  | PlayResY: 360 -> font size 26
         # (Custom watermark styles Info and WatermarkTop are strictly protected)
+        chosen_fontsize = None
         if target_rx == 1280 and target_ry == 720:
+            chosen_fontsize = "52"
+        elif target_rx == 640 and target_ry == 360:
+            chosen_fontsize = "26"
+
+        if chosen_fontsize:
             fontsize_idx = 2
             name_idx = 0
             for l in lines:
@@ -276,7 +286,7 @@ def inject_watermark_into_file(file_path: Path):
                     if len(parts) > max(name_idx, fontsize_idx):
                         style_name = parts[name_idx].strip().lower()
                         if style_name not in protected_style_names and "watermark" not in style_name:
-                            parts[fontsize_idx] = "52"
+                            parts[fontsize_idx] = chosen_fontsize
                             lines[i] = f"{prefix}{','.join(parts)}"
 
         # 1. Place styles 2 LINES BELOW ALL EXISTING STYLES (leave a blank line before)

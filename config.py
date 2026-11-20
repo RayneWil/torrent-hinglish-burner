@@ -154,6 +154,13 @@ QUALITY_MAP = {
         "video_bitrate": "1600k",
         "audio_bitrate": "128k",
         "fontsize": 52
+    },
+    "1080p": {
+        "width": -2,
+        "height": 1080,
+        "video_bitrate": "2800k",
+        "audio_bitrate": "192k",
+        "fontsize": 80
     }
 }
 

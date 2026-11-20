@@ -55,13 +55,43 @@ pip install -r requirements.txt --quiet 2>/dev/null || \
 pip3 install -r requirements.txt --break-system-packages --quiet 2>/dev/null || \
 pip3 install -r requirements.txt --quiet
 
-# 4. Add handy 'subber' alias to shell profile if not present
-BASHRC="$HOME/.bashrc"
-if [ -f "$BASHRC" ]; then
-    if ! grep -q "alias subber=" "$BASHRC"; then
-        echo "alias subber=\"cd $REPO_DIR && python3 ui.py\"" >> "$BASHRC"
-    fi
+# 4. Create global 'dsa' command launcher and aliases
+BIN_DIR=""
+if [ -d "$PREFIX/bin" ]; then
+    BIN_DIR="$PREFIX/bin"
+elif [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    BIN_DIR="/usr/local/bin"
+elif [ -d "$HOME/.local/bin" ]; then
+    BIN_DIR="$HOME/.local/bin"
+    mkdir -p "$BIN_DIR"
 fi
+
+if [ -n "$BIN_DIR" ]; then
+    cat << 'EOF' > "$BIN_DIR/dsa"
+#!/usr/bin/env bash
+cd "$HOME/torrent-hinglish-burner" || exit 1
+if command -v python3 &> /dev/null; then
+    exec python3 ui.py "$@"
+else
+    exec python ui.py "$@"
+fi
+EOF
+    chmod +x "$BIN_DIR/dsa"
+    ln -sf "$BIN_DIR/dsa" "$BIN_DIR/start-dsa" 2>/dev/null || true
+    echo "✅ Global command 'dsa' created! You can now just type 'dsa' anywhere to launch!"
+fi
+
+# Also add alias 'dsa' and 'subber' to shell profiles
+for RC in "$HOME/.bashrc" "$HOME/.profile" "$HOME/.zshrc"; do
+    if [ -f "$RC" ]; then
+        if ! grep -q "alias dsa=" "$RC"; then
+            echo "alias dsa=\"cd $REPO_DIR && python3 ui.py\"" >> "$RC"
+        fi
+        if ! grep -q "alias subber=" "$RC"; then
+            echo "alias subber=\"cd $REPO_DIR && python3 ui.py\"" >> "$RC"
+        fi
+    fi
+done
 
 # 5. Launch DSA Subber Interactive UI with real TTY attached
 echo "--------------------------------------------------------"

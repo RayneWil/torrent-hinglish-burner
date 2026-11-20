@@ -6,8 +6,11 @@ import math
 import json
 import asyncio
 import subprocess
+import urllib.request
+import urllib.error
+import urllib.parse
 from pathlib import Path
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple
 
 from rich.console import Console
 from rich.progress import (
@@ -107,17 +110,148 @@ def format_duration(seconds: int) -> str:
         return f"{hours}h {mins:02d}m {secs:02d}s"
     return f"{mins:02d}m {secs:02d}s"
 
-def clean_anime_title(filename: str) -> str:
-    """Extracts clean anime title from filename."""
+def parse_anime_info_from_filename(filename: str) -> Tuple[str, int, int]:
+    """
+    Extracts (clean_title, season, episode) from typical anime filenames.
+    e.g. '[SubsPlease] Sousou no Frieren - 08 (720p).mkv' -> ('Sousou no Frieren', 1, 8)
+    """
     name = Path(filename).stem
-    # Remove _Hinglish suffix if present
-    name = re.sub(r"_Hinglish$", "", name, flags=re.IGNORECASE)
-    # Remove release group tags like [Erai-raws], [SubsPlease]
+    name = re.sub(r"_Hinglish.*$", "", name, flags=re.IGNORECASE)
     name = re.sub(r"^\[.*?\]\s*", "", name)
-    # Remove trailing resolution/codec brackets like [720p CR WEB-DL AVC AAC][...]
     name = re.sub(r"\[.*?\]", "", name)
-    name = name.strip(" -_")
-    return name or Path(filename).stem
+    name = re.sub(r"\(.*?\)", "", name)
+    name = name.strip()
+
+    season = 1
+    episode = 1
+
+    s_match = re.search(r"[Ss](\d+)\s*[-_ ]*[Ee](\d+)", name)
+    if s_match:
+        season = int(s_match.group(1))
+        episode = int(s_match.group(2))
+        clean_name = re.sub(r"[Ss]\d+\s*[-_ ]*[Ee]\d+.*$", "", name)
+    else:
+        s_only = re.search(r"(?:Season\s*|S)(\d+)", name, re.IGNORECASE)
+        if s_only:
+            season = int(s_only.group(1))
+            name = re.sub(r"(?:Season\s*|S)\d+", "", name, flags=re.IGNORECASE)
+
+        ep_match = re.search(r"[-_ ]+(?:EP|Ep|Episode)?\s*(\d+)(?:\s|$)", name)
+        if ep_match:
+            episode = int(ep_match.group(1))
+            clean_name = name[:ep_match.start()]
+        else:
+            clean_name = name
+
+    clean_name = clean_name.strip(" -_.")
+    return clean_name or Path(filename).stem, season, episode
+
+ANILIST_GRAPHQL_QUERY = """
+query ($search: String) {
+  Media (search: $search, type: ANIME) {
+    id
+    title {
+      english
+      romaji
+    }
+    coverImage {
+      extraLarge
+      large
+    }
+    genres
+  }
+}
+"""
+
+def fetch_from_anilist(title: str) -> Dict:
+    """Queries AniList GraphQL API (100% keyless, public)."""
+    url = "https://graphql.anilist.co"
+    variables = {"search": title}
+    data = json.dumps({"query": ANILIST_GRAPHQL_QUERY, "variables": variables}).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "DSA-Subber/1.0"
+        }
+    )
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        res = json.loads(resp.read().decode("utf-8"))
+        return res.get("data", {}).get("Media", {}) or {}
+
+def fetch_anime_metadata_and_poster(
+    filename: str,
+    temp_dir: Path,
+    tmdb_api_key: str = ""
+) -> Tuple[str, int, int, str, Optional[Path]]:
+    """
+    Identifies anime English title, Season, Episode, Genres, and downloads
+    official HD Anime Poster thumbnail from TMDB (with AniList fallback).
+    """
+    clean_title, season, episode = parse_anime_info_from_filename(filename)
+    english_title = clean_title
+    genres = "Animation, Anime"
+    poster_url = None
+
+    # Step 1: Try TMDB first if API key is provided
+    if tmdb_api_key:
+        try:
+            tmdb_url = f"https://api.themoviedb.org/3/search/tv?api_key={tmdb_api_key}&query={urllib.parse.quote(clean_title)}"
+            with urllib.request.urlopen(tmdb_url, timeout=10) as r:
+                tmdb_data = json.loads(r.read().decode("utf-8"))
+                results = tmdb_data.get("results", [])
+                if results:
+                    first = results[0]
+                    english_title = first.get("name") or english_title
+                    if first.get("poster_path"):
+                        poster_url = f"https://image.tmdb.org/t/p/w500{first.get('poster_path')}"
+        except Exception as e:
+            console.print(f"[dim]⚠️ TMDB query notice: {e}[/dim]")
+
+    # Step 2: Fallback to AniList (keyless, comprehensive anime database)
+    if not poster_url:
+        try:
+            ani = fetch_from_anilist(clean_title)
+            if ani:
+                english_title = (
+                    ani.get("title", {}).get("english")
+                    or ani.get("title", {}).get("romaji")
+                    or english_title
+                )
+                g_list = ani.get("genres", [])
+                if g_list:
+                    genres = ", ".join(g_list[:3])
+                cover = ani.get("coverImage", {})
+                poster_url = cover.get("extraLarge") or cover.get("large")
+        except Exception as e:
+            console.print(f"[dim]⚠️ AniList query notice: {e}[/dim]")
+
+    # Step 3: Download and scale poster for Telegram thumbnail
+    poster_thumb_path = None
+    if poster_url:
+        try:
+            raw_poster = temp_dir / "anime_poster_raw.jpg"
+            out_thumb = temp_dir / f"{Path(filename).stem}_poster_thumb.jpg"
+            req = urllib.request.Request(poster_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=12) as resp, open(raw_poster, "wb") as f:
+                f.write(resp.read())
+
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(raw_poster.resolve()),
+                "-vf", "scale=320:-1",
+                "-q:v", "2",
+                str(out_thumb.resolve())
+            ]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            if out_thumb.exists() and out_thumb.stat().st_size > 0:
+                poster_thumb_path = out_thumb
+        except Exception as e:
+            console.print(f"[dim]⚠️ Poster download notice: {e}[/dim]")
+
+    return english_title, season, episode, genres, poster_thumb_path
 
 def make_text_progress_bar(percentage: float, total_blocks: int = 10) -> str:
     """Generates a text-based progress bar for Telegram messages (e.g. [█████░░░░░])."""
@@ -125,17 +259,49 @@ def make_text_progress_bar(percentage: float, total_blocks: int = 10) -> str:
     filled = max(0, min(total_blocks, filled))
     return "█" * filled + "░" * (total_blocks - filled)
 
-def build_caption(title: str, quality: str, height: int, size_mb: float, duration_str: str) -> str:
-    """Builds an attractive HTML caption for Telegram channel post."""
-    caption = (
-        f"🎬 <b>{title}</b>\n\n"
-        f"📺 <b>Resolution:</b> {height}p ({quality})\n"
-        f"📦 <b>File Size:</b> {size_mb:.1f} MB\n"
-        f"⏱️ <b>Duration:</b> {duration_str}\n"
-        f"🌐 <b>Audio/Sub:</b> Japanese Audio + Hinglish Subtitles\n\n"
-        f"✨ <i>Subbed in Hinglish by @DarkSoulAcademy</i>\n"
-        f"📢 <b>Join Telegram:</b> @DarkSoulAcademy"
-    )
+def build_caption(
+    title: str,
+    quality: str,
+    season: int = 1,
+    episode: int = 1,
+    genres: str = "Animation, Comedy",
+    style: str = "style2"
+) -> str:
+    """
+    Builds customized HTML caption for Telegram channel post.
+    Supports both Style 1 (Boxed with Genres) and Style 2 (Compact Dashed).
+    All text is bold, and title row uses Telegram <blockquote> quote styling.
+    """
+    clean_q = quality.upper()
+    if not clean_q.endswith("P"):
+        clean_q += "P"
+
+    if style == "style1":
+        caption = (
+            f"<blockquote><b>〄 {title} •</b></blockquote>\n"
+            f"<b>╭━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            f"<b>➣ Season: {season:02d}</b>\n"
+            f"<b>➣ Episodes: {episode:02d} [ Latest Episode ]</b>\n"
+            f"<b>➣ Genres : {genres}</b>\n"
+            f"<b>➣ Audio: Japanese</b>\n"
+            f"<b>➣ Quality: {clean_q} [Hindi Sub]</b>\n"
+            f"<b>╰━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            f"<b>╭━━━━━━━━━━━━━━━━━╮</b>\n"
+            f"<b>🔥 ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦ 🔥</b>\n"
+            f"<b>╰━━━━━━━━━━━━━━━━━╯</b>"
+        )
+    else:
+        # Default Style 2 (Compact Dashed)
+        caption = (
+            f"<blockquote><b>» {title} •</b></blockquote>\n"
+            f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+            f"<b>‣ Language: Jap (Hindi Sub)</b>\n"
+            f"<b>‣ Quality: {clean_q}</b>\n"
+            f"<b>‣ Season: {season:02d} | ‣ EP - {episode:02d}</b>\n"
+            f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+            f"<b>» Powered by ~ ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦</b>"
+        )
+
     return caption
 
 async def fast_upload_file(
@@ -264,12 +430,33 @@ async def _async_upload_to_telegram(
     file_size_bytes = video_path.stat().st_size
     file_size_mb = file_size_bytes / (1024 * 1024)
     duration_str = format_duration(meta["duration"])
-    clean_title = clean_anime_title(video_path.name)
-    caption = build_caption(clean_title, quality, meta["height"], file_size_mb, duration_str)
 
-    # Generate thumbnail
-    thumb_path = config.TEMP_DIR / f"{video_path.stem}_thumb.jpg"
-    thumb = generate_video_thumbnail(video_path, thumb_path, seek_sec=15)
+    # Fetch official English anime title & HD poster from TMDB / AniList
+    console.print("[bold cyan]🔍 Fetching official English title & HD poster from TMDB/AniList...[/bold cyan]")
+    eng_title, season, episode, genres, poster_thumb = fetch_anime_metadata_and_poster(
+        video_path.name,
+        config.TEMP_DIR,
+        tmdb_api_key=getattr(config, "TMDB_API_KEY", "")
+    )
+    console.print(f"[bold green]✨ Identified Anime: {eng_title} (S{season:02d}E{episode:02d})[/bold green]")
+
+    caption_style = getattr(config, "TELEGRAM_CAPTION_STYLE", "style2")
+    caption = build_caption(
+        title=eng_title,
+        quality=quality,
+        season=season,
+        episode=episode,
+        genres=genres,
+        style=caption_style
+    )
+
+    # Use HD Anime Poster thumbnail if available, otherwise fallback to video frame
+    if poster_thumb and poster_thumb.exists():
+        thumb = poster_thumb
+        console.print("[bold green]🖼️ Applied official Anime Poster as video thumbnail![/bold green]")
+    else:
+        thumb_path = config.TEMP_DIR / f"{video_path.stem}_thumb.jpg"
+        thumb = generate_video_thumbnail(video_path, thumb_path, seek_sec=15)
 
     video_attributes = [
         DocumentAttributeVideo(
@@ -280,7 +467,7 @@ async def _async_upload_to_telegram(
         )
     ]
 
-    console.print(f"[bold yellow]📤 Uploading '{clean_title}' ({file_size_mb:.1f} MB) to Telegram...[/bold yellow]")
+    console.print(f"[bold yellow]📤 Uploading '{eng_title}' ({file_size_mb:.1f} MB) to Telegram...[/bold yellow]")
 
     # Send initial upload start message to Owner
     owner_id = config.TELEGRAM_OWNER_ID
@@ -290,7 +477,7 @@ async def _async_upload_to_telegram(
             owner_msg = await client.send_message(
                 owner_id,
                 f"🚀 <b>DSA Subber: Upload Started!</b>\n\n"
-                f"🎬 <b>Title:</b> {clean_title}\n"
+                f"🎬 <b>Title:</b> {eng_title}\n"
                 f"📦 <b>Size:</b> {file_size_mb:.1f} MB\n"
                 f"📺 <b>Resolution:</b> {meta['height']}p ({quality})\n"
                 f"📢 <b>Target Channel:</b> <code>{chat_id}</code>\n\n"
@@ -328,7 +515,7 @@ async def _async_upload_to_telegram(
 
         text = (
             f"📤 <b>Uploading Video to Channel:</b>\n"
-            f"🎬 <b>{clean_title}</b>\n\n"
+            f"🎬 <b>{eng_title}</b>\n\n"
             f"<code>[{bar}]</code> <b>{pct:.1f}%</b>\n"
             f"📦 <b>Uploaded:</b> {curr_mb:.1f} / {tot_mb:.1f} MB\n"
             f"⚡ <b>Speed:</b> {speed_mb:.2f} MB/s\n"
@@ -388,7 +575,7 @@ async def _async_upload_to_telegram(
         try:
             await owner_msg.edit(
                 f"🎉 <b>Video Upload Complete!</b>\n\n"
-                f"🎬 <b>Title:</b> {clean_title}\n"
+                f"🎬 <b>Title:</b> {eng_title}\n"
                 f"📦 <b>Size:</b> {file_size_mb:.1f} MB\n"
                 f"⏱️ <b>Duration:</b> {duration_str}\n"
                 f"📺 <b>Resolution:</b> {meta['height']}p ({quality})\n\n"
@@ -404,7 +591,7 @@ async def _async_upload_to_telegram(
         try:
             sub_caption = (
                 f"📝 <b>Hinglish Subtitle File (.ass)</b>\n"
-                f"🎬 {clean_title}\n\n"
+                f"🎬 <b>{eng_title}</b> (S{season:02d}E{episode:02d})\n\n"
                 f"<i>@DarkSoulAcademy</i>"
             )
             await client.send_file(

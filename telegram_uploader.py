@@ -214,8 +214,19 @@ def fetch_anime_metadata_and_poster(
     # Step 1: Try TMDB first if API key is provided
     if tmdb_api_key:
         try:
-            tmdb_url = f"https://api.themoviedb.org/3/search/tv?api_key={tmdb_api_key}&query={urllib.parse.quote(clean_title)}"
-            with urllib.request.urlopen(tmdb_url, timeout=10) as r:
+            if tmdb_api_key.startswith("eyJ"):
+                tmdb_url = f"https://api.themoviedb.org/3/search/tv?query={urllib.parse.quote(clean_title)}&include_adult=false&language=en-US&page=1"
+                headers = {
+                    "Authorization": f"Bearer {tmdb_api_key}",
+                    "Accept": "application/json",
+                    "User-Agent": "Mozilla/5.0"
+                }
+            else:
+                tmdb_url = f"https://api.themoviedb.org/3/search/tv?api_key={tmdb_api_key}&query={urllib.parse.quote(clean_title)}"
+                headers = {"User-Agent": "Mozilla/5.0"}
+
+            req = urllib.request.Request(tmdb_url, headers=headers)
+            with urllib.request.urlopen(req, timeout=4) as r:
                 tmdb_data = json.loads(r.read().decode("utf-8"))
                 results = tmdb_data.get("results", [])
                 if results:
@@ -224,7 +235,7 @@ def fetch_anime_metadata_and_poster(
                     if first.get("poster_path"):
                         poster_url = f"https://image.tmdb.org/t/p/w500{first.get('poster_path')}"
         except Exception as e:
-            console.print(f"[dim]⚠️ TMDB query notice: {e}[/dim]")
+            console.print(f"[dim]⚠️ TMDB notice ({e}), seamlessly checking AniList...[/dim]")
 
     # Step 2: Fallback to AniList (keyless, comprehensive anime database)
     if not poster_url:

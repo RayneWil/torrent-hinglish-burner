@@ -45,9 +45,9 @@ def parse_args():
     parser.add_argument(
         "-q", "--quality",
         type=str,
-        choices=["480p", "720p", "1080p"],
+        choices=["480p", "720p", "1080p", "all"],
         default="720p",
-        help="Target output video quality (480p, 720p, or 1080p). Default: 720p"
+        help="Target output video quality (480p, 720p, 1080p, or 'all'). Default: 720p"
     )
     parser.add_argument(
         "-k", "--api-keys",
@@ -131,7 +131,7 @@ def main():
 
         # Step 3: Load & format as ASS
         console.rule("[bold yellow]Step 3: ASS Styling & Preparation[/bold yellow]")
-        font_size = config.QUALITY_MAP[args.quality]["fontsize"]
+        font_size = config.QUALITY_MAP.get(args.quality, config.QUALITY_MAP["720p"])["fontsize"]
         subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
 
         # Step 4: Translate to Hinglish (20 lines/request, auto-shift after 20 requests)
@@ -147,31 +147,36 @@ def main():
         console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
 
         # Step 5: Encode video & burn-in subtitles
-        console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {args.quality}[/bold yellow]")
-        final_video_name = f"{video_file.stem}_Hinglish_{args.quality}.mp4"
-        final_video_path = out_dir / final_video_name
-        burn_subtitles_and_encode(
-            video_path=video_file,
-            ass_path=final_ass_path,
-            output_path=final_video_path,
-            quality=args.quality
-        )
+        target_qualities = ["480p", "720p", "1080p"] if args.quality == "all" else [args.quality]
+        produced_videos = []
 
-        # Step 6: Upload to Telegram Channel (if enabled)
-        if config.TELEGRAM_AUTO_UPLOAD:
-            console.rule("[bold cyan]Step 6: Uploading to Telegram Channel[/bold cyan]")
-            from telegram_uploader import upload_to_telegram
-            upload_to_telegram(final_video_path, final_ass_path, quality=args.quality)
+        for q in target_qualities:
+            console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {q}[/bold yellow]")
+            final_video_name = f"{video_file.stem}_Hinglish_{q}.mp4"
+            final_video_path = out_dir / final_video_name
+            burn_subtitles_and_encode(
+                video_path=video_file,
+                ass_path=final_ass_path,
+                output_path=final_video_path,
+                quality=q
+            )
+            produced_videos.append((q, final_video_path))
+
+            # Step 6: Upload to Telegram Channel (if enabled)
+            if config.TELEGRAM_AUTO_UPLOAD:
+                console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel[/bold cyan]")
+                from telegram_uploader import upload_to_telegram
+                upload_to_telegram(final_video_path, final_ass_path, quality=q)
 
         # Summary Table
         table = Table(title="🎉 Processing Complete!", border_style="green")
         table.add_column("Property", style="cyan", no_wrap=True)
         table.add_column("Value", style="magenta")
         table.add_row("Original Video", video_file.name)
-        table.add_row("Resolution", args.quality)
+        table.add_row("Resolution", "All (480p, 720p, 1080p)" if args.quality == "all" else args.quality)
         table.add_row("Subtitle Type", "Hinglish (.ASS hardcoded)")
-        table.add_row("Final Output", str(final_video_path))
-        table.add_row("Output Size", f"{final_video_path.stat().st_size / (1024*1024):.1f} MB")
+        for q, f_path in produced_videos:
+            table.add_row(f"Output ({q})", f"{f_path.name} ({f_path.stat().st_size / (1024*1024):.1f} MB)")
         console.print(table)
 
     except KeyboardInterrupt:

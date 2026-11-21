@@ -164,6 +164,9 @@ QUALITY_MAP = {
     }
 }
 
+# Multi-quality sequence for batch burning
+ALL_QUALITIES = ["480p", "720p", "1080p"]
+
 # Fonts Directory
 FONTS_DIR = BASE_DIR / "fonts"
 

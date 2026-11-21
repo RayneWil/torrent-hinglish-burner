@@ -88,6 +88,11 @@ except Exception:
 TELEGRAM_AUTO_UPLOAD = os.getenv("TELEGRAM_AUTO_UPLOAD", "true").lower() in ("true", "1", "yes")
 TELEGRAM_UPLOAD_SUBTITLE = os.getenv("TELEGRAM_UPLOAD_SUBTITLE", "true").lower() in ("true", "1", "yes")
 
+# Saving destination mode: "both" (storage + telegram), "telegram" (telegram only), "storage" (storage only)
+SAVE_MODE = os.getenv("SAVE_MODE", "both").strip().lower()
+if SAVE_MODE not in ("both", "telegram", "storage"):
+    SAVE_MODE = "both"
+
 # TMDB & AniList Metadata Configuration
 _ENCODED_TMDB_TOKEN = "ZXlKaGJHY2lPaUpJVXpJMU5pSjkuZXlKaGRXUWlPaUkzWlROa01tVTRPRGM0WkRaaE9UaGxZbVpoTldVNFlURmxNRE01TVRRMFpDSXNJbTVpWmlJNk1UYzFOVFEzTmpNMU15NDROVElzSW5OMVlpSTZJalk0WVRJM01UZ3hNRGcyTkdJMFpEZG1OamczTURNMU5TSXNJbk5qYjNCbGN5STZXeUpoY0dsZmNtVmhaQ0pkTENKMlpYSnphVzl1SWpveGZRLmdJUUtiOE5jeC1BblRNanhCM1BjNm9UQ25COUtiMkdtVklFNjZodjBNdWM="
 DEFAULT_TMDB_API_KEY = base64.b64decode(_ENCODED_TMDB_TOKEN).decode()

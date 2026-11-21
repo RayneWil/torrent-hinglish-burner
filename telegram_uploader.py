@@ -993,12 +993,12 @@ def upload_to_telegram(
         console.print(f"[bold red]❌ Telegram Uploader encountered an error: {e}[/bold red]")
         return False
 
-def send_pipeline_start_notification(task_info: str, quality: str = "720p") -> None:
+def send_pipeline_start_notification(task_info: str, quality: str = "720p", save_mode: str = "both") -> None:
     """Initializes the live tracking notification for Owner ID."""
     try:
         from notifier import notifier
         clean_t, s_num, ep_num = parse_anime_info_from_filename(task_info)
         disp = f"{clean_t} (S{s_num:02d}E{ep_num:02d})"
-        notifier.start_pipeline(task_name=disp, quality=quality)
+        notifier.start_pipeline(task_name=disp, quality=quality, save_mode=save_mode)
     except Exception as e:
         console.print(f"[dim]⚠️ Could not initialize live tracker: {e}[/dim]")

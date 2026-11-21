@@ -627,7 +627,7 @@ def start_burning_workflow(quality: str, save_mode: str = "both"):
     select_burning_mode_menu(quality=quality, save_mode=save_mode)
 
 def test_telegram_connection():
-    """Tests the Telegram Bot connection and sends a test message to the channel."""
+    """Tests the Telegram Bot connection and sends a test message to the channels."""
     console.print("\n[bold cyan]✈️ Testing Telegram Bot connection...[/bold cyan]")
     try:
         from telegram_uploader import ensure_telethon_installed
@@ -641,13 +641,28 @@ def test_telegram_connection():
                 await client.start(bot_token=config.TELEGRAM_BOT_TOKEN)
                 me = await client.get_me()
                 console.print(f"[bold green]✅ Bot connected successfully as: @{me.username} ({me.first_name})![/bold green]")
-                console.print(f"[dim]Sending test message to channel {config.TELEGRAM_CHAT_ID}...[/dim]")
+                console.print(f"[dim]Sending test message to Video Channel {config.TELEGRAM_CHAT_ID}...[/dim]")
                 msg = await client.send_message(
                     config.TELEGRAM_CHAT_ID,
-                    "🤖 <b>DSA Subber Connected!</b>\n\nTelegram Auto-Uploader is ready! 🚀\n<i>Channel: @DarkSoulAcademy</i>",
+                    "🤖 <b>DSA Subber Connected!</b>\n\nTelegram Video Auto-Uploader is ready! 🚀\n<i>Channel: @DarkSoulAcademy</i>",
                     parse_mode="html"
                 )
-                console.print(f"[bold green]🎉 Test message delivered successfully to your channel (Message ID: {msg.id})![/bold green]")
+                console.print(f"[bold green]🎉 Video channel test delivered successfully (Message ID: {msg.id})![/bold green]")
+
+                # Send test message to Subtitle Channel
+                sub_channel = getattr(config, "TELEGRAM_SUBTITLE_CHAT_ID", None)
+                if sub_channel:
+                    console.print(f"[dim]Sending test message to Subtitle Channel {sub_channel}...[/dim]")
+                    try:
+                        s_msg = await client.send_message(
+                            sub_channel,
+                            "📝 <b>DSA Subber Connected!</b>\n\nHinglish Subtitle (.ass) Channel is ready! 🚀",
+                            parse_mode="html"
+                        )
+                        console.print(f"[bold green]🎉 Subtitle channel test delivered successfully (Message ID: {s_msg.id})![/bold green]")
+                    except Exception as ex_sub:
+                        console.print(f"[yellow]⚠️ Could not send to Subtitle Channel ({sub_channel}): {ex_sub}[/yellow]")
+                        console.print("[dim]💡 Hint: Make sure your bot is added as Administrator with 'Post Messages' in the subtitle channel too![/dim]")
 
                 # Send test message to Owner ID
                 if config.TELEGRAM_OWNER_ID:
@@ -687,20 +702,22 @@ def manage_telegram_settings():
         console.print(Panel(
             f"[bold white]✈️ Telegram Auto-Uploader Configuration[/bold white]\n\n"
             f"• [bold]Auto-Upload Status:[/bold] {status_text}\n"
-            f"• [bold]Target Channel/Chat ID:[/bold] [bold cyan]{config.TELEGRAM_CHAT_ID}[/bold cyan]\n"
+            f"• [bold]Target Video Channel:[/bold] [bold cyan]{config.TELEGRAM_CHAT_ID}[/bold cyan]\n"
+            f"• [bold]Target Subtitle Channel:[/bold] [bold cyan]{config.TELEGRAM_SUBTITLE_CHAT_ID}[/bold cyan]\n"
             f"• [bold]Owner Notification ID:[/bold] [bold cyan]{config.TELEGRAM_OWNER_ID}[/bold cyan]\n"
             f"• [bold]Upload .ass Subtitle:[/bold] [bold cyan]{'Yes' if config.TELEGRAM_UPLOAD_SUBTITLE else 'No'}[/bold cyan]\n"
             f"• [bold]Engine:[/bold] [bold green]Telethon MTProto (Supports up to 2 GB)[/bold green]\n\n"
             "[bold cyan][1][/bold cyan] 🔄 [bold]Toggle Auto-Upload (ON / OFF)[/bold]\n"
-            "[bold cyan][2][/bold cyan] 📢 [bold]Change Target Channel / Chat ID[/bold]\n"
-            "[bold cyan][3][/bold cyan] 🧪 [bold]Test Bot Connection & Send Test Message[/bold]\n"
-            "[bold cyan][4][/bold cyan] ↩️ [bold]Back to Main Menu[/bold]",
+            "[bold cyan][2][/bold cyan] 🎬 [bold]Change Target Video Channel ID[/bold]\n"
+            "[bold cyan][3][/bold cyan] 📝 [bold]Change Target Subtitle Channel ID[/bold]\n"
+            "[bold cyan][4][/bold cyan] 🧪 [bold]Test Bot Connection & Send Test Message[/bold]\n"
+            "[bold cyan][5][/bold cyan] ↩️ [bold]Back to Main Menu[/bold]",
             title="[bold magenta]Telegram Settings[/bold magenta]",
             border_style="magenta"
         ))
 
         try:
-            choice = Prompt.ask("[bold cyan]Enter choice (1-4)[/bold cyan]", choices=["1", "2", "3", "4"], default="4")
+            choice = Prompt.ask("[bold cyan]Enter choice (1-5)[/bold cyan]", choices=["1", "2", "3", "4", "5"], default="5")
         except (EOFError, KeyboardInterrupt):
             break
 
@@ -709,15 +726,22 @@ def manage_telegram_settings():
             console.print(f"\n[bold green]✅ Telegram Auto-Upload is now {'ENABLED' if config.TELEGRAM_AUTO_UPLOAD else 'DISABLED'}![/bold green]")
             time.sleep(1.5)
         elif choice == "2":
-            new_id = Prompt.ask("\n[bold yellow]Enter new Channel ID (e.g. -1003511011855) or @username[/bold yellow]")
+            new_id = Prompt.ask("\n[bold yellow]Enter new Video Channel ID (e.g. -1003511011855) or @username[/bold yellow]")
             if new_id.strip():
                 clean_val = new_id.strip()
                 config.TELEGRAM_CHAT_ID = int(clean_val) if clean_val.lstrip("-").isdigit() else clean_val
-                console.print(f"[bold green]✅ Channel ID updated to: {config.TELEGRAM_CHAT_ID}[/bold green]")
+                console.print(f"[bold green]✅ Video Channel ID updated to: {config.TELEGRAM_CHAT_ID}[/bold green]")
                 time.sleep(1.5)
         elif choice == "3":
-            test_telegram_connection()
+            new_id = Prompt.ask("\n[bold yellow]Enter new Subtitle Channel ID (e.g. -1004353971283) or @username[/bold yellow]")
+            if new_id.strip():
+                clean_val = new_id.strip()
+                config.TELEGRAM_SUBTITLE_CHAT_ID = int(clean_val) if clean_val.lstrip("-").isdigit() else clean_val
+                console.print(f"[bold green]✅ Subtitle Channel ID updated to: {config.TELEGRAM_SUBTITLE_CHAT_ID}[/bold green]")
+                time.sleep(1.5)
         elif choice == "4":
+            test_telegram_connection()
+        elif choice == "5":
             break
 
 def main_menu():

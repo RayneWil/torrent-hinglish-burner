@@ -109,11 +109,17 @@ class TelegramNotifier:
     def render_tracker_card(self) -> str:
         """Formats the live visual dashboard tracker card."""
         clean_name = self.task_name[:50]
+        mode_label = {
+            "both": "Both (Storage + Telegram)",
+            "telegram": "Telegram Only (0 MB Phone)",
+            "storage": "Storage Only (Offline)"
+        }.get(getattr(self, "save_mode", "both"), "Both")
         return (
             f"⚡ <b>DSA Subber — Live Pipeline Tracker</b>\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n"
             f"🎬 <b>Task:</b> <code>{clean_name}</code>\n"
-            f"⚙️ <b>Quality Target:</b> {self.quality}\n\n"
+            f"⚙️ <b>Quality Target:</b> {self.quality}\n"
+            f"💾 <b>Destination:</b> {mode_label}\n\n"
             f"📥 <b>Download:</b> {self.state['download']}\n"
             f"📝 <b>Translation:</b> {self.state['translation']}\n"
             f"🎞 <b>Encoding:</b> {self.state['encoding']}\n"
@@ -159,8 +165,9 @@ class TelegramNotifier:
     # PIPELINE LIFECYCLE HOOKS
     # =========================================================================
 
-    def start_pipeline(self, task_name: str, quality: str = "720p"):
+    def start_pipeline(self, task_name: str, quality: str = "720p", save_mode: str = "both"):
         """Called when a new anime torrent job begins."""
+        self.save_mode = save_mode.strip().lower() if save_mode else "both"
         if "dn=" in task_name:
             import urllib.parse
             m = re.search(r'dn=([^&]+)', task_name)
@@ -182,7 +189,10 @@ class TelegramNotifier:
         self.state["download"] = "⏳ Connecting to BitTorrent swarm..."
         self.state["translation"] = "⏳ Waiting for subtitle extraction..."
         self.state["encoding"] = f"⏳ Waiting for translation ({self.quality})..."
-        self.state["upload"] = "⏳ Waiting for encoding..."
+        if self.save_mode == "storage":
+            self.state["upload"] = "⏭️ Skipped (Storage Only mode)"
+        else:
+            self.state["upload"] = "⏳ Waiting for encoding..."
         self.state["current_status"] = "🚀 Pipeline Started — Connecting to torrent peers..."
         
         self.edit_live_card(force=True)
@@ -318,6 +328,20 @@ class TelegramNotifier:
             f"📢 <b>Channel:</b> {channel_title}\n"
             f"⚙️ <b>Quality:</b> {self.quality}\n\n"
             f"🔥 <i>All steps completed: Download ➔ Translation ➔ Encoding ➔ Upload! 🚀</i>"
+        )
+
+    def finish_storage_only(self, title: str, saved_dir: str):
+        """Called when anime pipeline completes in storage-only mode."""
+        self.state["upload"] = "💾 Saved to Local Storage (No upload)"
+        self.state["current_status"] = "🎉 Pipeline Successfully Completed!"
+        self.edit_live_card(force=True)
+
+        self.send_message(
+            f"💾 <b>Anime Successfully Saved to Storage!</b>\n\n"
+            f"🎬 <b>Title:</b> {title}\n"
+            f"📁 <b>Saved to:</b> <code>{saved_dir}</code>\n"
+            f"⚙️ <b>Quality:</b> {self.quality}\n\n"
+            f"🔥 <i>Mode: Storage Only (Telegram Upload skipped). Subtitle & Video ready on device! 🚀</i>"
         )
 
     def notify_service_start(self, cmd_args: Optional[list] = None):

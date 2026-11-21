@@ -37,6 +37,8 @@ except ImportError:
 
 import config
 
+_UPLOADED_SUBTITLES_CACHE = set()
+
 def ensure_telethon_installed():
     """Silently ensures telethon is installed."""
     try:
@@ -949,24 +951,35 @@ async def _async_upload_to_telegram(
         except Exception:
             pass
 
-    # Optional: Also upload the .ass subtitle file
+    # Optional: Upload the .ass subtitle file to dedicated Subtitle Channel
+    sub_target_chat_id = getattr(config, "TELEGRAM_SUBTITLE_CHAT_ID", -1004353971283)
     if config.TELEGRAM_UPLOAD_SUBTITLE and sub_path and sub_path.exists():
-        console.print(f"[dim]📄 Uploading Hinglish subtitle file ({sub_path.name})...[/dim]")
-        try:
-            sub_caption = (
-                f"📝 <b>Hinglish Subtitle File (.ass)</b>\n"
-                f"🎬 <b>{eng_title}</b> (S{season:02d}E{episode:02d})\n\n"
-                f"<i>@DarkSoulAcademy</i>"
-            )
-            await client.send_file(
-                entity=chat_id,
-                file=str(sub_path.resolve()),
-                caption=sub_caption,
-                parse_mode="html"
-            )
-            console.print("[bold green]✅ Subtitle file (.ass) also uploaded![/bold green]")
-        except Exception as e:
-            console.print(f"[dim]⚠️ Subtitle upload notice: {e}[/dim]")
+        sub_cache_key = f"{sub_path.name}_{sub_target_chat_id}"
+        if sub_cache_key not in _UPLOADED_SUBTITLES_CACHE:
+            console.print(f"[dim]📄 Uploading Hinglish subtitle file ({sub_path.name}) to Subtitle Channel ({sub_target_chat_id})...[/dim]")
+            try:
+                pure_title = clean_caption_title(eng_title)
+                sub_caption = (
+                    f"<b>» {pure_title} •</b>\n"
+                    f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+                    f"<b>📝 Hinglish Subtitle (.ass)</b>\n"
+                    f"<b>‣ Season: {season:02d} | ‣ EP - {episode:02d}</b>\n"
+                    f"<b>‣ Language: Hindi Sub (Hinglish)</b>\n"
+                    f"<b>➖➖➖➖➖➖➖➖➖➖➖➖</b>\n"
+                    f"<b>» Powered by ~ ♡<a href=\"https://t.me/DarkSoulAcademy\">DαɾƙSσυʅAƈαԃҽɱყ</a>✦</b>"
+                )
+                await client.send_file(
+                    entity=sub_target_chat_id,
+                    file=str(sub_path.resolve()),
+                    caption=sub_caption,
+                    parse_mode="html"
+                )
+                _UPLOADED_SUBTITLES_CACHE.add(sub_cache_key)
+                console.print(f"[bold green]✅ Subtitle file (.ass) uploaded to Subtitle Channel ({sub_target_chat_id})![/bold green]")
+            except Exception as e:
+                console.print(f"[dim]⚠️ Subtitle upload notice ({sub_target_chat_id}): {e}[/dim]")
+        else:
+            console.print(f"[dim]ℹ️ Subtitle file already uploaded for this episode to {sub_target_chat_id}.[/dim]")
 
     # Clean up thumbnail
     if thumb and thumb.exists():

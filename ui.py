@@ -78,28 +78,33 @@ def change_api_keys_menu():
 
 def select_quality_menu(current_quality: str) -> str:
     show_header()
-    console.print(Panel(f"[bold yellow]⚙️ Select Output Quality (Current: {current_quality})[/bold yellow]", border_style="yellow"))
+    disp_q = "All (480p ➔ 720p ➔ 1080p)" if current_quality == "all" else current_quality
+    console.print(Panel(f"[bold yellow]⚙️ Select Output Quality (Current: {disp_q})[/bold yellow]", border_style="yellow"))
     console.print("[1] 1080p (Full High Definition - Crisp Quality)")
     console.print("[2] 720p (High Definition - Recommended for PC & Mobile)")
     console.print("[3] 480p (Standard Definition - Fast & Low File Size)")
-    console.print("[4] Keep Current")
+    console.print("[4] All Qualities (Batch: 480p ➔ 720p ➔ 1080p sequentially)")
+    console.print("[5] Keep Current")
 
     try:
-        choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3", "4"], default="4")
+        choice = Prompt.ask("[cyan]Select option[/cyan]", choices=["1", "2", "3", "4", "5"], default="5")
         if choice == "1":
             return "1080p"
         elif choice == "2":
             return "720p"
         elif choice == "3":
             return "480p"
+        elif choice == "4":
+            return "all"
     except (EOFError, KeyboardInterrupt):
         pass
     return current_quality
 
 def start_burning_workflow(quality: str):
     show_header()
+    disp_q = "All (480p ➔ 720p ➔ 1080p)" if quality == "all" else quality
     console.print(Panel(
-        f"[bold green]🚀 Start Burning Process | Target Quality: {quality}[/bold green]\n"
+        f"[bold green]🚀 Start Burning Process | Target Quality: {disp_q}[/bold green]\n"
         f"📁 Subtitle Output: [cyan]{config.SUBTITLE_OUTPUT_DIR}[/cyan]\n"
         f"🎬 Video Output:    [cyan]{config.VIDEO_OUTPUT_DIR}[/cyan]",
         border_style="green"
@@ -147,7 +152,7 @@ def start_burning_workflow(quality: str):
 
         # Step 3: ASS Styling
         console.rule("[bold cyan]Step 3: Styling Subtitles[/bold cyan]")
-        font_size = config.QUALITY_MAP[quality]["fontsize"]
+        font_size = config.QUALITY_MAP.get(quality, config.QUALITY_MAP["720p"])["fontsize"]
         subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
 
         # Step 4: AI Hinglish Translation (20 lines/req, 20 reqs/key)
@@ -165,36 +170,41 @@ def start_burning_workflow(quality: str):
         console.print(f"[bold green]💾 Subtitle saved to: {final_sub_destination}[/bold green]")
 
         # Step 5: Encoding & Burning
-        console.rule(f"[bold cyan]Step 5: Burning Subtitles & Encoding ({quality})[/bold cyan]")
-        temp_encoded_video = temp_dir / f"{video_file.stem}_Hinglish_{quality}.mp4"
-        burn_subtitles_and_encode(
-            video_path=video_file,
-            ass_path=final_sub_destination,
-            output_path=temp_encoded_video,
-            quality=quality
-        )
+        target_qualities = ["480p", "720p", "1080p"] if quality == "all" else [quality]
+        produced_videos = []
 
-        # Step 6: Move burned video to Download/Anime Burn/Video/
-        final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{quality}.mp4"
-        shutil.move(str(temp_encoded_video), str(final_video_destination))
+        for idx, q in enumerate(target_qualities, 1):
+            console.rule(f"[bold cyan]Step 5: Burning Subtitles & Encoding [{idx}/{len(target_qualities)}] ({q})[/bold cyan]")
+            temp_encoded_video = temp_dir / f"{video_file.stem}_Hinglish_{q}.mp4"
+            burn_subtitles_and_encode(
+                video_path=video_file,
+                ass_path=final_sub_destination,
+                output_path=temp_encoded_video,
+                quality=q
+            )
 
-        # Step 7: Auto-Upload to Telegram Channel
-        if config.TELEGRAM_AUTO_UPLOAD:
-            console.rule("[bold cyan]Step 6: Uploading to Telegram Channel[/bold cyan]")
-            try:
-                from telegram_uploader import upload_to_telegram
-                upload_to_telegram(final_video_destination, final_sub_destination, quality=quality)
-            except Exception as e:
-                console.print(f"[bold red]⚠️ Telegram upload skipped due to error: {e}[/bold red]")
+            # Step 6: Move burned video to Download/Anime Burn/Video/
+            final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{q}.mp4"
+            shutil.move(str(temp_encoded_video), str(final_video_destination))
+            produced_videos.append((q, final_video_destination))
+
+            # Step 7: Auto-Upload to Telegram Channel for this quality
+            if config.TELEGRAM_AUTO_UPLOAD:
+                console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel[/bold cyan]")
+                try:
+                    from telegram_uploader import upload_to_telegram
+                    upload_to_telegram(final_video_destination, final_sub_destination, quality=q)
+                except Exception as e:
+                    console.print(f"[bold red]⚠️ Telegram upload skipped for {q} due to error: {e}[/bold red]")
 
         # Completion Success Banner
         show_header()
+        v_lines = "\n".join([f"  • [bold white]{q.upper()}:[/bold white] [bold cyan]{dest.name}[/bold cyan] ({dest.stat().st_size / (1024*1024):.1f} MB)" for q, dest in produced_videos])
         console.print(Panel(
             f"[bold green]🎉 PROCESSING COMPLETED SUCCESSFULLY! 🎉[/bold green]\n\n"
-            f"[bold white]🎬 Burned Video:[/bold white] [bold cyan]{final_video_destination}[/bold cyan] "
-            f"({final_video_destination.stat().st_size / (1024*1024):.1f} MB)\n"
-            f"[bold white]📝 Hinglish Subtitle:[/bold white] [bold cyan]{final_sub_destination}[/bold cyan]\n"
-            f"[bold white]Quality:[/bold white] {quality}\n\n"
+            f"[bold white]🎬 Burned Videos ({len(produced_videos)} total):[/bold white]\n{v_lines}\n\n"
+            f"[bold white]📝 Hinglish Subtitle:[/bold white] [bold cyan]{final_sub_destination.name}[/bold cyan]\n"
+            f"[bold white]📁 Saved in Folder:[/bold white] [green]{config.VIDEO_OUTPUT_DIR}[/green]\n\n"
             f"[dim]Saved in: Download/Anime Burn/Video & Download/Anime Burn/Subtitle[/dim]",
             title="[bold green]Done[/bold green]",
             border_style="green"
@@ -319,11 +329,12 @@ def main_menu():
     while True:
         show_header()
         tg_badge = "[bold green]ON[/bold green]" if config.TELEGRAM_AUTO_UPLOAD else "[bold red]OFF[/bold red]"
+        disp_q_menu = "All (480p, 720p, 1080p)" if quality == "all" else quality
         console.print(Panel(
             "[bold white]Select an option:[/bold white]\n\n"
             "[bold green][1][/bold green] 🔥 [bold]Start Burning[/bold]\n"
             "[bold yellow][2][/bold yellow] 🔑 [bold]Change API Key[/bold]\n"
-            f"[bold cyan][3][/bold cyan] ⚙️ [bold]Change Quality[/bold] (Current: [cyan]{quality}[/cyan])\n"
+            f"[bold cyan][3][/bold cyan] ⚙️ [bold]Change Quality[/bold] (Current: [cyan]{disp_q_menu}[/cyan])\n"
             f"[bold blue][4][/bold blue] 📂 [bold]View Anime Burn Folders[/bold]\n"
             "       ├── [dim]Video:    " + str(config.VIDEO_OUTPUT_DIR) + "[/dim]\n"
             "       └── [dim]Subtitle: " + str(config.SUBTITLE_OUTPUT_DIR) + "[/dim]\n"

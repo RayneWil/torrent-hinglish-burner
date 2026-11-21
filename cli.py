@@ -18,6 +18,7 @@ from downloader import download_torrent
 from subtitles import extract_subtitle, load_and_style_subtitles, save_ass_subtitles
 from translator import translate_subtitles_to_hinglish
 from encoder import burn_subtitles_and_encode
+from ui import parse_links_from_input
 
 console = Console()
 
@@ -39,8 +40,9 @@ def parse_args():
     parser.add_argument(
         "-t", "--torrent",
         type=str,
+        nargs="*",
         default=None,
-        help="Magnet URI or path to .torrent file (Leave empty to launch Interactive UI)"
+        help="One or more Magnet URIs / .torrent file paths / text file path with links (Leave empty to launch Interactive UI)"
     )
     parser.add_argument(
         "-q", "--quality",
@@ -102,6 +104,16 @@ def main():
         main_menu()
         return
 
+    raw_list = args.torrent if isinstance(args.torrent, list) else [args.torrent]
+    queue = []
+    for item in raw_list:
+        queue.extend(parse_links_from_input(item))
+
+    if not queue:
+        from ui import main_menu
+        main_menu()
+        return
+
     print_banner()
 
     # Determine API keys list
@@ -123,113 +135,147 @@ def main():
 
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    temp_dir = config.TEMP_DIR / "job_run"
-    temp_dir.mkdir(parents=True, exist_ok=True)
+    save_mode = args.save_mode.strip().lower()
+    total_q = len(queue)
+    queue_results = []
 
-    try:
-        # Step 1: Download video via aria2c
-        console.rule("[bold yellow]Step 1: Downloading Video[/bold yellow]")
-        video_file = download_torrent(args.torrent, temp_dir)
+    for q_idx, torrent_link in enumerate(queue, 1):
+        q_label = f"[{q_idx}/{total_q}]" if total_q > 1 else ""
+        temp_dir = config.TEMP_DIR / f"cli_job_{int(time.time())}_{q_idx}"
+        temp_dir.mkdir(parents=True, exist_ok=True)
 
-        # Step 2: Extract subtitle track
-        console.rule("[bold yellow]Step 2: Subtitle Extraction[/bold yellow]")
-        raw_sub_path = temp_dir / f"{video_file.stem}_extracted.ass"
-        extracted_sub = extract_subtitle(video_file, raw_sub_path, track_index=args.sub_track)
-
-        # Step 3: Load & format as ASS
-        console.rule("[bold yellow]Step 3: ASS Styling & Preparation[/bold yellow]")
-        font_size = config.QUALITY_MAP.get(args.quality, config.QUALITY_MAP["720p"])["fontsize"]
-        subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
-
-        # Step 4: Translate to Hinglish (20 lines/request, auto-shift after 20 requests)
-        console.rule("[bold yellow]Step 4: AI Hinglish Translation (Multi-Key Rotation)[/bold yellow]")
-        hinglish_subs = translate_subtitles_to_hinglish(
-            subs,
-            api_keys=api_keys,
-            batch_size=20,
-            max_requests_per_key=20
-        )
-
-        save_mode = args.save_mode.strip().lower()
-        if save_mode in ("both", "storage"):
-            final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
-            save_ass_subtitles(hinglish_subs, final_ass_path)
-            console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
-        else:
-            final_ass_path = temp_dir / f"{video_file.stem}_Hinglish.ass"
-            save_ass_subtitles(hinglish_subs, final_ass_path)
-            console.print(f"[bold cyan]📄 Subtitle prepared for Telegram upload (temporary)[/bold cyan]")
-
-        # Step 5: Encode video & burn-in subtitles
-        target_qualities = ["480p", "720p", "1080p"] if args.quality == "all" else [args.quality]
-        produced_videos = []
-
-        for q in target_qualities:
-            console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {q}[/bold yellow]")
-            final_video_name = f"{video_file.stem}_Hinglish_{q}.mp4"
-            if save_mode in ("both", "storage"):
-                final_video_path = out_dir / final_video_name
-            else:
-                final_video_path = temp_dir / final_video_name
-
-            burn_subtitles_and_encode(
-                video_path=video_file,
-                ass_path=final_ass_path,
-                output_path=final_video_path,
-                quality=q
-            )
-            file_size_mb = final_video_path.stat().st_size / (1024 * 1024)
-            produced_videos.append((q, final_video_path, file_size_mb))
-
-            # Step 6: Upload to Telegram Channel (if enabled)
-            if save_mode in ("both", "telegram") and config.TELEGRAM_AUTO_UPLOAD:
-                console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel[/bold cyan]")
-                from telegram_uploader import upload_to_telegram
-                upload_to_telegram(final_video_path, final_ass_path, quality=q)
-            elif save_mode == "storage":
-                console.print(f"[dim]ℹ️ Skipping Telegram upload (Save mode: Storage Only)[/dim]")
-
-            # Clean up temp video in telegram-only mode
-            if save_mode == "telegram" and not args.keep_temp:
-                try:
-                    final_video_path.unlink(missing_ok=True)
-                    console.print(f"[dim]🗑️ Cleaned up temporary {q} video to preserve device storage.[/dim]")
-                except Exception:
-                    pass
-
-        # If storage-only mode, notify owner
-        if save_mode == "storage":
+        try:
+            # Send start notification to Owner
             try:
-                from notifier import notifier
-                from telegram_uploader import parse_anime_info_from_filename
-                clean_t, s_num, ep_num = parse_anime_info_from_filename(video_file.name)
-                notifier.finish_storage_only(
-                    f"{clean_t} (S{s_num:02d}E{ep_num:02d})",
-                    str(out_dir)
+                from telegram_uploader import send_pipeline_start_notification
+                send_pipeline_start_notification(
+                    torrent_link,
+                    quality=args.quality,
+                    save_mode=save_mode,
+                    queue_info=f"Task {q_idx}/{total_q}" if total_q > 1 else ""
                 )
             except Exception:
                 pass
 
-        # Summary Table
-        table = Table(title="🎉 Processing Complete!", border_style="green")
-        table.add_column("Property", style="cyan", no_wrap=True)
-        table.add_column("Value", style="magenta")
-        table.add_row("Original Video", video_file.name)
-        table.add_row("Resolution", "All (480p, 720p, 1080p)" if args.quality == "all" else args.quality)
-        table.add_row("Subtitle Type", "Hinglish (.ASS hardcoded)")
-        table.add_row("Saving Destination", save_mode.upper())
-        for q, f_path, size_mb in produced_videos:
-            status = "Saved & Uploaded" if save_mode == "both" else ("Uploaded (Temp cleaned)" if save_mode == "telegram" else "Saved in Storage")
-            table.add_row(f"Output ({q})", f"{f_path.name} ({size_mb:.1f} MB) [{status}]")
-        console.print(table)
+            # Step 1: Download video via aria2c
+            console.rule(f"[bold yellow]Step 1: Downloading Video {q_label}[/bold yellow]")
+            video_file = download_torrent(torrent_link, temp_dir)
 
-    except KeyboardInterrupt:
-        console.print("\n[bold red]⚠️ Process cancelled by user.[/bold red]")
-        sys.exit(1)
-    finally:
-        if not args.keep_temp and temp_dir.exists():
-            console.print("[dim]Cleaning up temporary workspace...[/dim]")
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            # Step 2: Extract subtitle track
+            console.rule(f"[bold yellow]Step 2: Subtitle Extraction {q_label}[/bold yellow]")
+            raw_sub_path = temp_dir / f"{video_file.stem}_extracted.ass"
+            extracted_sub = extract_subtitle(video_file, raw_sub_path, track_index=args.sub_track)
+
+            # Step 3: Load & format as ASS
+            console.rule(f"[bold yellow]Step 3: ASS Styling & Preparation {q_label}[/bold yellow]")
+            font_size = config.QUALITY_MAP.get(args.quality, config.QUALITY_MAP["720p"])["fontsize"]
+            subs = load_and_style_subtitles(extracted_sub, font_size=font_size)
+
+            # Step 4: Translate to Hinglish (20 lines/request, auto-shift after 20 requests)
+            console.rule(f"[bold yellow]Step 4: AI Hinglish Translation (Multi-Key Rotation) {q_label}[/bold yellow]")
+            hinglish_subs = translate_subtitles_to_hinglish(
+                subs,
+                api_keys=api_keys,
+                batch_size=20,
+                max_requests_per_key=20
+            )
+
+            if save_mode in ("both", "storage"):
+                final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
+                save_ass_subtitles(hinglish_subs, final_ass_path)
+                console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
+            else:
+                final_ass_path = temp_dir / f"{video_file.stem}_Hinglish.ass"
+                save_ass_subtitles(hinglish_subs, final_ass_path)
+                console.print(f"[bold cyan]📄 Subtitle prepared for Telegram upload (temporary)[/bold cyan]")
+
+            # Step 5: Encode video & burn-in subtitles
+            target_qualities = ["480p", "720p", "1080p"] if args.quality == "all" else [args.quality]
+            produced_videos = []
+
+            for q in target_qualities:
+                console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {q} {q_label}[/bold yellow]")
+                final_video_name = f"{video_file.stem}_Hinglish_{q}.mp4"
+                if save_mode in ("both", "storage"):
+                    final_video_path = out_dir / final_video_name
+                else:
+                    final_video_path = temp_dir / final_video_name
+
+                burn_subtitles_and_encode(
+                    video_path=video_file,
+                    ass_path=final_ass_path,
+                    output_path=final_video_path,
+                    quality=q
+                )
+                file_size_mb = final_video_path.stat().st_size / (1024 * 1024)
+                produced_videos.append((q, final_video_path, file_size_mb))
+
+                # Step 6: Upload to Telegram Channel (if enabled)
+                if save_mode in ("both", "telegram") and config.TELEGRAM_AUTO_UPLOAD:
+                    console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel {q_label}[/bold cyan]")
+                    from telegram_uploader import upload_to_telegram
+                    upload_to_telegram(final_video_path, final_ass_path, quality=q)
+                elif save_mode == "storage":
+                    console.print(f"[dim]ℹ️ Skipping Telegram upload (Save mode: Storage Only)[/dim]")
+
+                # Clean up temp video in telegram-only mode
+                if save_mode == "telegram" and not args.keep_temp:
+                    try:
+                        final_video_path.unlink(missing_ok=True)
+                        console.print(f"[dim]🗑️ Cleaned up temporary {q} video to preserve device storage.[/dim]")
+                    except Exception:
+                        pass
+
+            # If storage-only mode, notify owner
+            if save_mode == "storage":
+                try:
+                    from notifier import notifier
+                    from telegram_uploader import parse_anime_info_from_filename
+                    clean_t, s_num, ep_num = parse_anime_info_from_filename(video_file.name)
+                    notifier.finish_storage_only(
+                        f"{clean_t} (S{s_num:02d}E{ep_num:02d})",
+                        str(out_dir)
+                    )
+                except Exception:
+                    pass
+
+            queue_results.append((True, video_file.name, produced_videos))
+
+            # Per-task summary table
+            table = Table(title=f"🎉 Processing Complete {q_label}!", border_style="green")
+            table.add_column("Property", style="cyan", no_wrap=True)
+            table.add_column("Value", style="magenta")
+            table.add_row("Original Video", video_file.name)
+            table.add_row("Resolution", "All (480p, 720p, 1080p)" if args.quality == "all" else args.quality)
+            table.add_row("Subtitle Type", "Hinglish (.ASS hardcoded)")
+            table.add_row("Saving Destination", save_mode.upper())
+            for q, f_path, size_mb in produced_videos:
+                status = "Saved & Uploaded" if save_mode == "both" else ("Uploaded (Temp cleaned)" if save_mode == "telegram" else "Saved in Storage")
+                table.add_row(f"Output ({q})", f"{f_path.name} ({size_mb:.1f} MB) [{status}]")
+            console.print(table)
+
+        except KeyboardInterrupt:
+            console.print("\n[bold red]⚠️ Process cancelled by user.[/bold red]")
+            sys.exit(1)
+        except Exception as e:
+            console.print(f"[bold red]❌ Error processing task {q_idx}: {e}[/bold red]")
+            queue_results.append((False, str(torrent_link)[:40], []))
+        finally:
+            if not args.keep_temp and temp_dir.exists():
+                shutil.rmtree(temp_dir, ignore_errors=True)
+
+        if q_idx < total_q:
+            console.print(f"\n[bold green]✅ Task [{q_idx}/{total_q}] finished! Starting next queued task in 3 seconds...[/bold green]\n")
+            import time
+            time.sleep(3)
+
+    if total_q > 1:
+        try:
+            from notifier import notifier
+            completed = sum(1 for r in queue_results if r[0])
+            notifier.finish_queue_summary(total_q, completed, total_q - completed)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     main()

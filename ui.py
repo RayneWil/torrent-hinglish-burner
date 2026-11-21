@@ -296,6 +296,14 @@ def process_single_job(
                 except Exception:
                     pass
 
+        # Raw downloaded torrent video is no longer needed after encoding
+        if video_file.exists():
+            try:
+                video_file.unlink(missing_ok=True)
+                console.print("[dim]🗑️ Raw torrent download deleted to free up device space.[/dim]")
+            except Exception:
+                pass
+
         # If storage-only mode, notify owner ID of completed job
         if save_mode == "storage":
             try:

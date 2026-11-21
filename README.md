@@ -40,8 +40,10 @@ Select an option:
 [1] 🔥 Start Burning
 [2] 🔑 Change API Key
 [3] ⚙️ Change Quality (Current: 720p)
-[4] 📂 Open Anime Burn Folder
-[5] 🚪 Exit
+[4] 💾 Saving Destination (Current: Both (Storage + TG))
+[5] 📂 View Anime Burn Folders
+[6] ✈️ Telegram Settings / Test Upload (ON)
+[7] 🚪 Exit
 ```
 
 1. Select **`[1] Start Burning`**
@@ -49,12 +51,12 @@ Select an option:
 3. Watch the live progress bar as it:
    - Downloads the torrent via `aria2c`
    - Extracts the subtitle track
-   - Translates subtitles (30 lines/req with 5 API key auto-rotation)
-   - Burns `.ass` subtitles into video (480p, 720p, 1080p, or All Qualities batch: 480p ➔ 720p ➔ 1080p)
-4. The files are automatically separated and saved in:
-   - **🎬 Burned Video:** `Download/Anime Burn/Video/<Video_Name>.mp4`
-   - **📝 Hinglish Subtitle:** `Download/Anime Burn/Subtitle/<Video_Name>_Hinglish.ass`
-   *(On Android Termux, this is in `/sdcard/Download/Anime Burn/...`)*
+   - Translates subtitles (20 lines/req with 5 API key auto-rotation)
+   - Burns `.ass` subtitles into video (**1080p**, **720p**, **480p**, or **All Qualities batch**: 480p ➔ 720p ➔ 1080p)
+4. Saves or uploads according to your **Saving Destination**:
+   - **🌟 Both (Default):** Saves burned video to `Download/Anime Burn/Video` and subtitle to `Download/Anime Burn/Subtitle`, and automatically uploads to your Telegram channel.
+   - **✈️ Save to Telegram Only:** Uploads to Telegram channel and purges local files to protect phone/device storage (0 MB used).
+   - **📱 Save in Storage Only:** Saves to device storage only and skips Telegram upload completely.
 
 ---
 
@@ -139,9 +141,10 @@ python cli.py -t "magnet:..." --api-keys "key1,key2,key3,key4,key5" -q 720p
 | Argument | Short | Description | Default |
 |---|---|---|---|
 | `--torrent` | `-t` | Magnet URI or path to `.torrent` file | **Required** |
-| `--quality` | `-q` | Output video resolution (`480p` or `720p`) | `720p` |
+| `--quality` | `-q` | Output video resolution (`1080p`, `720p`, `480p`, `all`) | `720p` |
+| `--save-mode` | `-d` | Saving mode (`both`, `telegram`, `storage`) | `both` |
 | `--api-keys` | `-k` | Comma-separated Gemini API Keys | From `.env` |
-| `--output-dir` | `-o` | Directory to save final video | `./output` |
+| `--output-dir` | `-o` | Directory to save final video | `Download/Anime Burn/Video` |
 | `--sub-track` | `-s` | Subtitle track index to extract (0, 1, etc.) | Auto-detect |
 
 ---

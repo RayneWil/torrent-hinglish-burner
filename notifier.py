@@ -177,11 +177,11 @@ class TelegramNotifier:
         except Exception:
             self.task_name = task_name[:50]
 
-        self.quality = quality
+        self.quality = "All (480p ➔ 720p ➔ 1080p)" if quality == "all" else quality
         self.live_message_id = None
         self.state["download"] = "⏳ Connecting to BitTorrent swarm..."
         self.state["translation"] = "⏳ Waiting for subtitle extraction..."
-        self.state["encoding"] = f"⏳ Waiting for translation ({quality})..."
+        self.state["encoding"] = f"⏳ Waiting for translation ({self.quality})..."
         self.state["upload"] = "⏳ Waiting for encoding..."
         self.state["current_status"] = "🚀 Pipeline Started — Connecting to torrent peers..."
         

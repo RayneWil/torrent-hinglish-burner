@@ -100,13 +100,60 @@ def select_quality_menu(current_quality: str) -> str:
         pass
     return current_quality
 
-def start_burning_workflow(quality: str):
+def select_save_mode_menu(current_mode: str) -> str:
+    show_header()
+    disp_mode = {
+        "both": "Both (Storage + Telegram)",
+        "telegram": "Save to Telegram Only",
+        "storage": "Save in Storage Only"
+    }.get(current_mode, "Both")
+
+    console.print(Panel(f"[bold yellow]💾 Select Saving Destination (Current: {disp_mode})[/bold yellow]", border_style="yellow"))
+    console.print("[1] 🌟 Both (Save in Storage + Upload to Telegram) [Default]")
+    console.print("    • Saves video & subtitle to Download/Anime Burn/ on device")
+    console.print("    • Automatically uploads to Telegram Channel\n")
+    console.print("[2] ✈️ Save to Telegram Only (Save Phone Storage)")
+    console.print("    • Uploads to Telegram Channel")
+    console.print("    • Deletes local copies after upload (0 MB phone storage used)\n")
+    console.print("[3] 📱 Save in Storage Only (Offline Archive)")
+    console.print("    • Saves video & subtitle to Download/Anime Burn/ on device")
+    console.print("    • Skips Telegram upload completely\n")
+    console.print(f"[4] ↩️ Keep Current ({disp_mode})")
+
+    try:
+        choice = Prompt.ask("[cyan]Select option (1-4)[/cyan]", choices=["1", "2", "3", "4"], default="4")
+        if choice == "1":
+            return "both"
+        elif choice == "2":
+            return "telegram"
+        elif choice == "3":
+            return "storage"
+        elif choice == "4":
+            return current_mode
+    except (EOFError, KeyboardInterrupt):
+        pass
+    return current_mode
+
+def start_burning_workflow(quality: str, save_mode: str = "both"):
     show_header()
     disp_q = "All (480p ➔ 720p ➔ 1080p)" if quality == "all" else quality
+    disp_mode = {
+        "both": "Both (Device Storage + Telegram)",
+        "telegram": "Telegram Only (0 MB Storage)",
+        "storage": "Device Storage Only (Offline)"
+    }.get(save_mode, "Both")
+
+    storage_info = (
+        f"📁 Subtitle Output: [cyan]{config.SUBTITLE_OUTPUT_DIR}[/cyan]\n"
+        f"🎬 Video Output:    [cyan]{config.VIDEO_OUTPUT_DIR}[/cyan]"
+        if save_mode in ("both", "storage")
+        else "💾 Phone Storage:  [bold green]Protected (0 MB used - Upload & Auto-clean)[/bold green]"
+    )
+
     console.print(Panel(
         f"[bold green]🚀 Start Burning Process | Target Quality: {disp_q}[/bold green]\n"
-        f"📁 Subtitle Output: [cyan]{config.SUBTITLE_OUTPUT_DIR}[/cyan]\n"
-        f"🎬 Video Output:    [cyan]{config.VIDEO_OUTPUT_DIR}[/cyan]",
+        f"💾 Saving Mode:    [bold magenta]{disp_mode}[/bold magenta]\n"
+        f"{storage_info}",
         border_style="green"
     ))
 
@@ -137,7 +184,7 @@ def start_burning_workflow(quality: str):
         # Send start notification to Telegram Owner if configured
         try:
             from telegram_uploader import send_pipeline_start_notification
-            send_pipeline_start_notification(torrent_input, quality=quality)
+            send_pipeline_start_notification(torrent_input, quality=quality, save_mode=save_mode)
         except Exception:
             pass
 
@@ -164,10 +211,14 @@ def start_burning_workflow(quality: str):
             max_requests_per_key=20
         )
         
-        # Save translated subtitle into Download/Anime Burn/Subtitle/
-        final_sub_destination = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
-        save_ass_subtitles(hinglish_subs, final_sub_destination)
-        console.print(f"[bold green]💾 Subtitle saved to: {final_sub_destination}[/bold green]")
+        if save_mode in ("both", "storage"):
+            final_sub_destination = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
+            save_ass_subtitles(hinglish_subs, final_sub_destination)
+            console.print(f"[bold green]💾 Subtitle saved to: {final_sub_destination}[/bold green]")
+        else:
+            final_sub_destination = temp_dir / f"{video_file.stem}_Hinglish.ass"
+            save_ass_subtitles(hinglish_subs, final_sub_destination)
+            console.print(f"[bold cyan]📄 Subtitle ready for Telegram upload (Temporary)[/bold cyan]")
 
         # Step 5: Encoding & Burning
         target_qualities = ["480p", "720p", "1080p"] if quality == "all" else [quality]
@@ -183,29 +234,70 @@ def start_burning_workflow(quality: str):
                 quality=q
             )
 
-            # Step 6: Move burned video to Download/Anime Burn/Video/
-            final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{q}.mp4"
-            shutil.move(str(temp_encoded_video), str(final_video_destination))
-            produced_videos.append((q, final_video_destination))
+            file_size_mb = temp_encoded_video.stat().st_size / (1024 * 1024)
 
-            # Step 7: Auto-Upload to Telegram Channel for this quality
-            if config.TELEGRAM_AUTO_UPLOAD:
+            if save_mode in ("both", "storage"):
+                final_video_destination = config.VIDEO_OUTPUT_DIR / f"{video_file.stem}_Hinglish_{q}.mp4"
+                shutil.copy2(str(temp_encoded_video), str(final_video_destination))
+                video_for_upload = final_video_destination
+                produced_videos.append((q, final_video_destination, "saved", file_size_mb))
+                console.print(f"[bold green]💾 Video saved to storage: {final_video_destination}[/bold green]")
+            else:
+                video_for_upload = temp_encoded_video
+                produced_videos.append((q, temp_encoded_video, "telegram_only", file_size_mb))
+                console.print(f"[bold cyan]🎬 Video encoded ({file_size_mb:.1f} MB), preparing for upload...[/bold cyan]")
+
+            # Step 6: Auto-Upload to Telegram Channel for this quality
+            if save_mode in ("both", "telegram") and config.TELEGRAM_AUTO_UPLOAD:
                 console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel[/bold cyan]")
                 try:
                     from telegram_uploader import upload_to_telegram
-                    upload_to_telegram(final_video_destination, final_sub_destination, quality=q)
+                    upload_to_telegram(video_for_upload, final_sub_destination, quality=q)
                 except Exception as e:
                     console.print(f"[bold red]⚠️ Telegram upload skipped for {q} due to error: {e}[/bold red]")
+            elif save_mode == "storage":
+                console.print(f"[dim]ℹ️ Telegram upload skipped (Save Mode: Storage Only)[/dim]")
+
+            # In Telegram-only mode, clean up the large encoded video immediately to free disk space
+            if save_mode == "telegram":
+                try:
+                    temp_encoded_video.unlink(missing_ok=True)
+                    console.print(f"[dim]🗑️ Cleaned up temporary {q} video to preserve device storage.[/dim]")
+                except Exception:
+                    pass
+
+        # If storage-only mode, notify owner ID of completed job
+        if save_mode == "storage":
+            try:
+                from notifier import notifier
+                from telegram_uploader import parse_anime_info_from_filename
+                clean_t, s_num, ep_num = parse_anime_info_from_filename(video_file.name)
+                notifier.finish_storage_only(
+                    f"{clean_t} (S{s_num:02d}E{ep_num:02d})",
+                    str(config.VIDEO_OUTPUT_DIR)
+                )
+            except Exception:
+                pass
 
         # Completion Success Banner
         show_header()
-        v_lines = "\n".join([f"  • [bold white]{q.upper()}:[/bold white] [bold cyan]{dest.name}[/bold cyan] ({dest.stat().st_size / (1024*1024):.1f} MB)" for q, dest in produced_videos])
+        if save_mode == "telegram":
+            v_lines = "\n".join([f"  • [bold white]{q.upper()}:[/bold white] [bold cyan]{video_file.stem}_Hinglish_{q}.mp4[/bold cyan] ({item[3]:.1f} MB) [green]➔ Uploaded to Telegram & Storage Freed![/green]" for item in produced_videos for q in [item[0]]])
+            storage_msg = "[bold green]📱 Device Storage Saved:[/bold green] All local heavy video files were automatically purged!"
+        elif save_mode == "storage":
+            v_lines = "\n".join([f"  • [bold white]{q.upper()}:[/bold white] [bold cyan]{dest.name}[/bold cyan] ({dest.stat().st_size / (1024*1024):.1f} MB)" for q, dest, *_ in produced_videos])
+            storage_msg = f"[bold white]📁 Saved to Device Folder:[/bold white] [green]{config.VIDEO_OUTPUT_DIR}[/green]"
+        else:
+            v_lines = "\n".join([f"  • [bold white]{q.upper()}:[/bold white] [bold cyan]{dest.name}[/bold cyan] ({dest.stat().st_size / (1024*1024):.1f} MB) [green]➔ Saved & Uploaded[/green]" for q, dest, *_ in produced_videos])
+            storage_msg = f"[bold white]📁 Saved to Device Folder:[/bold white] [green]{config.VIDEO_OUTPUT_DIR}[/green] & Uploaded to Telegram"
+
         console.print(Panel(
             f"[bold green]🎉 PROCESSING COMPLETED SUCCESSFULLY! 🎉[/bold green]\n\n"
-            f"[bold white]🎬 Burned Videos ({len(produced_videos)} total):[/bold white]\n{v_lines}\n\n"
+            f"[bold white]🎬 Videos Processed ({len(produced_videos)} total):[/bold white]\n{v_lines}\n\n"
             f"[bold white]📝 Hinglish Subtitle:[/bold white] [bold cyan]{final_sub_destination.name}[/bold cyan]\n"
-            f"[bold white]📁 Saved in Folder:[/bold white] [green]{config.VIDEO_OUTPUT_DIR}[/green]\n\n"
-            f"[dim]Saved in: Download/Anime Burn/Video & Download/Anime Burn/Subtitle[/dim]",
+            f"[bold white]💾 Saving Mode:[/bold white] [magenta]{disp_mode}[/magenta]\n"
+            f"{storage_msg}\n\n"
+            f"[dim]Subtitles: {'Download/Anime Burn/Subtitle' if save_mode in ('both', 'storage') else 'Uploaded to Telegram'} | Videos: {'Download/Anime Burn/Video' if save_mode in ('both', 'storage') else 'Uploaded to Telegram'}[/dim]",
             title="[bold green]Done[/bold green]",
             border_style="green"
         ))
@@ -213,6 +305,11 @@ def start_burning_workflow(quality: str):
     except Exception as e:
         console.print("\n[bold red]❌ Error occurred:[/bold red]")
         console.print(str(e), markup=False)
+        try:
+            from notifier import notifier
+            notifier.notify_error("Processing Workflow", str(e))
+        except Exception:
+            pass
     finally:
         # Cleanup temp directory
         if temp_dir.exists():
@@ -325,44 +422,62 @@ def main_menu():
         pass
 
     quality = "720p"
+    save_mode = getattr(config, "SAVE_MODE", "both")
 
     while True:
         show_header()
         tg_badge = "[bold green]ON[/bold green]" if config.TELEGRAM_AUTO_UPLOAD else "[bold red]OFF[/bold red]"
         disp_q_menu = "All (480p, 720p, 1080p)" if quality == "all" else quality
+        disp_save_badge = {
+            "both": "[green]Both (Storage + TG)[/green]",
+            "telegram": "[cyan]Telegram Only[/cyan]",
+            "storage": "[yellow]Storage Only[/yellow]"
+        }.get(save_mode, save_mode)
+
         console.print(Panel(
             "[bold white]Select an option:[/bold white]\n\n"
             "[bold green][1][/bold green] 🔥 [bold]Start Burning[/bold]\n"
             "[bold yellow][2][/bold yellow] 🔑 [bold]Change API Key[/bold]\n"
             f"[bold cyan][3][/bold cyan] ⚙️ [bold]Change Quality[/bold] (Current: [cyan]{disp_q_menu}[/cyan])\n"
-            f"[bold blue][4][/bold blue] 📂 [bold]View Anime Burn Folders[/bold]\n"
+            f"[bold magenta][4][/bold magenta] 💾 [bold]Saving Destination[/bold] (Current: {disp_save_badge})\n"
+            f"[bold blue][5][/bold blue] 📂 [bold]View Anime Burn Folders[/bold]\n"
             "       ├── [dim]Video:    " + str(config.VIDEO_OUTPUT_DIR) + "[/dim]\n"
             "       └── [dim]Subtitle: " + str(config.SUBTITLE_OUTPUT_DIR) + "[/dim]\n"
-            f"[bold magenta][5][/bold magenta] ✈️ [bold]Telegram Settings / Test Upload[/bold] ({tg_badge})\n"
-            "[bold red][6][/bold red] 🚪 [bold]Exit[/bold]",
+            f"[bold cyan][6][/bold cyan] ✈️ [bold]Telegram Settings / Test Upload[/bold] ({tg_badge})\n"
+            "[bold red][7][/bold red] 🚪 [bold]Exit[/bold]",
             title="[bold cyan]Main Menu[/bold cyan]",
             border_style="cyan"
         ))
 
         try:
-            choice = Prompt.ask("[bold cyan]Enter choice (1-6)[/bold cyan]", choices=["1", "2", "3", "4", "5", "6"], default="1")
+            choice = Prompt.ask("[bold cyan]Enter choice (1-7)[/bold cyan]", choices=["1", "2", "3", "4", "5", "6", "7"], default="1")
         except (EOFError, KeyboardInterrupt):
             console.print("\n\n[bold yellow]Exiting... Bye![/bold yellow]")
             sys.exit(0)
 
         if choice == "1":
-            start_burning_workflow(quality)
+            start_burning_workflow(quality=quality, save_mode=save_mode)
         elif choice == "2":
             change_api_keys_menu()
         elif choice == "3":
             quality = select_quality_menu(quality)
         elif choice == "4":
+            save_mode = select_save_mode_menu(save_mode)
+            config.SAVE_MODE = save_mode
+            disp_m = {
+                "both": "Both (Storage + Telegram)",
+                "telegram": "Telegram Only",
+                "storage": "Storage Only"
+            }.get(save_mode, save_mode)
+            console.print(f"\n[bold green]✅ Saving Destination updated to: {disp_m}![/bold green]")
+            time.sleep(1.2)
+        elif choice == "5":
             console.print(f"\n[bold cyan]🎬 Video Folder:    {config.VIDEO_OUTPUT_DIR}[/bold cyan]")
             console.print(f"[bold cyan]📝 Subtitle Folder: {config.SUBTITLE_OUTPUT_DIR}[/bold cyan]\n")
             time.sleep(3)
-        elif choice == "5":
-            manage_telegram_settings()
         elif choice == "6":
+            manage_telegram_settings()
+        elif choice == "7":
             console.print("\n[bold yellow]👋 Exiting DSA Subber. Bye bhai![/bold yellow]\n")
             sys.exit(0)
 

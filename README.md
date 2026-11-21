@@ -50,7 +50,7 @@ Select an option:
    - Downloads the torrent via `aria2c`
    - Extracts the subtitle track
    - Translates subtitles (30 lines/req with 5 API key auto-rotation)
-   - Burns `.ass` subtitles into video and compresses to 480p, 720p, or 1080p
+   - Burns `.ass` subtitles into video (480p, 720p, 1080p, or All Qualities batch: 480p ➔ 720p ➔ 1080p)
 4. The files are automatically separated and saved in:
    - **🎬 Burned Video:** `Download/Anime Burn/Video/<Video_Name>.mp4`
    - **📝 Hinglish Subtitle:** `Download/Anime Burn/Subtitle/<Video_Name>_Hinglish.ass`

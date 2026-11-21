@@ -68,6 +68,13 @@ def parse_args():
         help="Specific subtitle track stream index to extract (optional)"
     )
     parser.add_argument(
+        "-d", "--save-mode",
+        type=str,
+        choices=["both", "telegram", "storage"],
+        default=config.SAVE_MODE,
+        help="Saving destination: 'both' (Storage + Telegram), 'telegram' (Telegram only, 0 MB disk used), or 'storage' (Storage only, no upload). Default: both"
+    )
+    parser.add_argument(
         "--keep-temp",
         action="store_true",
         help="Keep temporary downloaded & intermediate subtitle files"
@@ -142,9 +149,16 @@ def main():
             batch_size=20,
             max_requests_per_key=20
         )
-        final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
-        save_ass_subtitles(hinglish_subs, final_ass_path)
-        console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
+
+        save_mode = args.save_mode.strip().lower()
+        if save_mode in ("both", "storage"):
+            final_ass_path = config.SUBTITLE_OUTPUT_DIR / f"{video_file.stem}_Hinglish.ass"
+            save_ass_subtitles(hinglish_subs, final_ass_path)
+            console.print(f"[bold green]💾 Subtitle saved to: {final_ass_path}[/bold green]")
+        else:
+            final_ass_path = temp_dir / f"{video_file.stem}_Hinglish.ass"
+            save_ass_subtitles(hinglish_subs, final_ass_path)
+            console.print(f"[bold cyan]📄 Subtitle prepared for Telegram upload (temporary)[/bold cyan]")
 
         # Step 5: Encode video & burn-in subtitles
         target_qualities = ["480p", "720p", "1080p"] if args.quality == "all" else [args.quality]
@@ -153,20 +167,48 @@ def main():
         for q in target_qualities:
             console.rule(f"[bold yellow]Step 5: Burning Subtitles & Encoding to {q}[/bold yellow]")
             final_video_name = f"{video_file.stem}_Hinglish_{q}.mp4"
-            final_video_path = out_dir / final_video_name
+            if save_mode in ("both", "storage"):
+                final_video_path = out_dir / final_video_name
+            else:
+                final_video_path = temp_dir / final_video_name
+
             burn_subtitles_and_encode(
                 video_path=video_file,
                 ass_path=final_ass_path,
                 output_path=final_video_path,
                 quality=q
             )
-            produced_videos.append((q, final_video_path))
+            file_size_mb = final_video_path.stat().st_size / (1024 * 1024)
+            produced_videos.append((q, final_video_path, file_size_mb))
 
             # Step 6: Upload to Telegram Channel (if enabled)
-            if config.TELEGRAM_AUTO_UPLOAD:
+            if save_mode in ("both", "telegram") and config.TELEGRAM_AUTO_UPLOAD:
                 console.rule(f"[bold cyan]Step 6: Uploading {q} to Telegram Channel[/bold cyan]")
                 from telegram_uploader import upload_to_telegram
                 upload_to_telegram(final_video_path, final_ass_path, quality=q)
+            elif save_mode == "storage":
+                console.print(f"[dim]ℹ️ Skipping Telegram upload (Save mode: Storage Only)[/dim]")
+
+            # Clean up temp video in telegram-only mode
+            if save_mode == "telegram" and not args.keep_temp:
+                try:
+                    final_video_path.unlink(missing_ok=True)
+                    console.print(f"[dim]🗑️ Cleaned up temporary {q} video to preserve device storage.[/dim]")
+                except Exception:
+                    pass
+
+        # If storage-only mode, notify owner
+        if save_mode == "storage":
+            try:
+                from notifier import notifier
+                from telegram_uploader import parse_anime_info_from_filename
+                clean_t, s_num, ep_num = parse_anime_info_from_filename(video_file.name)
+                notifier.finish_storage_only(
+                    f"{clean_t} (S{s_num:02d}E{ep_num:02d})",
+                    str(out_dir)
+                )
+            except Exception:
+                pass
 
         # Summary Table
         table = Table(title="🎉 Processing Complete!", border_style="green")
@@ -175,8 +217,10 @@ def main():
         table.add_row("Original Video", video_file.name)
         table.add_row("Resolution", "All (480p, 720p, 1080p)" if args.quality == "all" else args.quality)
         table.add_row("Subtitle Type", "Hinglish (.ASS hardcoded)")
-        for q, f_path in produced_videos:
-            table.add_row(f"Output ({q})", f"{f_path.name} ({f_path.stat().st_size / (1024*1024):.1f} MB)")
+        table.add_row("Saving Destination", save_mode.upper())
+        for q, f_path, size_mb in produced_videos:
+            status = "Saved & Uploaded" if save_mode == "both" else ("Uploaded (Temp cleaned)" if save_mode == "telegram" else "Saved in Storage")
+            table.add_row(f"Output ({q})", f"{f_path.name} ({size_mb:.1f} MB) [{status}]")
         console.print(table)
 
     except KeyboardInterrupt:

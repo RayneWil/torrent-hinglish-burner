@@ -147,26 +147,37 @@ def parse_links_from_input(text: str) -> List[str]:
     if not text:
         return []
 
-    p = Path(text)
-    if p.exists() and p.is_file():
+    # 1. Check if input is a local file (ONLY if not a magnet link and short path to prevent OS [Errno 36])
+    if not text.startswith("magnet:") and "\n" not in text and len(text) < 260:
         try:
-            with open(p, "r", encoding="utf-8") as f:
-                lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-                return lines
-        except Exception:
+            p = Path(text)
+            if p.is_file():
+                with open(p, "r", encoding="utf-8") as f:
+                    return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        except (OSError, ValueError):
             pass
 
-    found = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "magnet:?" in line and line.count("magnet:?") > 1:
-            for part in line.split("magnet:?"):
-                if part.strip():
-                    found.append("magnet:?" + part.strip())
-        else:
-            found.append(line)
+    # 2. Extract magnet links or line-separated links
+    found: List[str] = []
+    # If text contains "magnet:?", split by lookahead r'(?=magnet:\?)'
+    if "magnet:?" in text:
+        raw_parts = re.split(r'(?=magnet:\?)', text)
+        for part in raw_parts:
+            part = part.strip()
+            if not part:
+                continue
+            for line in part.splitlines():
+                line = line.strip()
+                if line.startswith("magnet:?"):
+                    found.append(line)
+                elif line and not line.startswith("#"):
+                    found.append(line)
+    else:
+        for line in text.splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                found.append(line)
+
     return found
 
 def process_single_job(
@@ -432,10 +443,11 @@ def run_multi_task_workflow(quality: str, save_mode: str = "both"):
     console.print(Panel(
         f"[bold magenta]🚀 Multi-Task Queue Setup | Target Quality: {disp_q}[/bold magenta]\n"
         f"💾 Saving Mode:    [bold cyan]{disp_mode}[/bold cyan]\n\n"
-        "• [green]Direct Entry:[/green] Ek-ek karke link paste karo, ya multiple links ek sath paste kar do.\n"
-        "• [yellow]File Path:[/yellow] Kisi file ka path daal sakte ho jisme links hain (e.g. [cyan]links.txt[/cyan]).\n"
-        "• [cyan]Done:[/cyan] Jab sab links enter ho jayein, to khali [bold yellow]Enter[/bold yellow] dabao ya [bold yellow]'done'[/bold yellow] likho.",
-        title="[bold magenta]Batch Queue[/bold magenta]",
+        "[bold white]📌 Kaise use karein (3 aasan tareeqe):[/bold white]\n"
+        "  1️⃣ [green]Ek-ek karke paste karo:[/green] Pehla link daal kar [bold yellow]Enter[/bold yellow] dabao ➔ fir dusra link daalo ➔ jab sab ho jaye to khali [bold yellow]Enter[/bold yellow] daba do!\n"
+        "  2️⃣ [green]Ek sath paste karo:[/green] Agar aapne multiple magnet links copy kiye hain, to unhe ek sath paste kar do, system automatically sabko detect kar lega!\n"
+        "  3️⃣ [green]Text file se:[/green] Kisi file ka path daal do jisme links hain (e.g. [yellow]links.txt[/yellow]).",
+        title="[bold magenta]Batch Queue Setup[/bold magenta]",
         border_style="magenta"
     ))
 
@@ -451,16 +463,23 @@ def run_multi_task_workflow(quality: str, save_mode: str = "both"):
 
     queue: List[str] = []
     while True:
+        count = len(queue)
+        if count == 0:
+            prompt_str = "\n[bold yellow]👉 Pehla Magnet link / Torrent paste karo (ya wapas jane ke liye khali Enter):[/bold yellow]"
+        else:
+            prompt_str = f"\n[bold yellow]👉 Agla Link #{count + 1} paste karo (ya Queue Start karne ke liye khali [bold green]Enter[/bold green] dabao):[/bold yellow]"
+
         try:
-            line = Prompt.ask(f"[bold yellow]👉 Link #{len(queue) + 1} (ya Enter dabao jab ho jaye)[/bold yellow]").strip()
+            line = Prompt.ask(prompt_str).strip()
         except (EOFError, KeyboardInterrupt):
             break
 
-        if not line or line.lower() == "done":
+        if not line or line.lower() in ("done", "exit", "quit"):
             break
 
         parsed = parse_links_from_input(line)
         if not parsed:
+            console.print("[red]⚠️ Koi valid link nahi mila. Dobara try karein.[/red]")
             continue
 
         added = 0
@@ -470,9 +489,9 @@ def run_multi_task_workflow(quality: str, save_mode: str = "both"):
                 added += 1
 
         if added == 1:
-            console.print(f"[bold green]✓ Link #{len(queue)} added to queue![/bold green]")
+            console.print(f"[bold green]✅ Task #{len(queue)} successfully queue me add ho gaya![/bold green]")
         elif added > 1:
-            console.print(f"[bold green]✓ Added {added} links to queue! (Total in queue: {len(queue)})[/bold green]")
+            console.print(f"[bold green]🎉 Ek sath {added} links successfully queue me add ho gaye! (Total: {len(queue)})[/bold green]")
 
     if not queue:
         console.print("\n[yellow]Koi torrent link add nahi kiya gaya. Returning to menu...[/yellow]")

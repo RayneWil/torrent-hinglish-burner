@@ -46,14 +46,15 @@ Select an option:
 [7] 🚪 Exit
 ```
 
-1. Select **`[1] Start Burning`**
-2. Paste your **Torrent link / Magnet URI**.
-3. Watch the live progress bar as it:
+1. Select **`[1] Start Burning`** and pick your mode:
+   - **`[1] 🎯 Single Task:`** Process 1 anime episode / torrent link immediately.
+   - **`[2] 🚀 Multi-Task Queue:`** Paste multiple torrent links or a `.txt` file; processes each torrent sequentially in queue (ek task complete hone ke baad agla automatic start hoga)!
+2. Watch the live progress bar as it:
    - Downloads the torrent via `aria2c`
    - Extracts the subtitle track
    - Translates subtitles (20 lines/req with 5 API key auto-rotation)
    - Burns `.ass` subtitles into video (**1080p**, **720p**, **480p**, or **All Qualities batch**: 480p ➔ 720p ➔ 1080p)
-4. Saves or uploads according to your **Saving Destination**:
+3. Saves or uploads according to your **Saving Destination**:
    - **🌟 Both (Default):** Saves burned video to `Download/Anime Burn/Video` and subtitle to `Download/Anime Burn/Subtitle`, and automatically uploads to your Telegram channel.
    - **✈️ Save to Telegram Only:** Uploads to Telegram channel and purges local files to protect phone/device storage (0 MB used).
    - **📱 Save in Storage Only:** Saves to device storage only and skips Telegram upload completely.
@@ -140,7 +141,7 @@ python cli.py -t "magnet:..." --api-keys "key1,key2,key3,key4,key5" -q 720p
 ### CLI Arguments:
 | Argument | Short | Description | Default |
 |---|---|---|---|
-| `--torrent` | `-t` | Magnet URI or path to `.torrent` file | **Required** |
+| `--torrent` | `-t` | One or more Magnet URIs / `.torrent` files / `.txt` queue file | **Required** |
 | `--quality` | `-q` | Output video resolution (`1080p`, `720p`, `480p`, `all`) | `720p` |
 | `--save-mode` | `-d` | Saving mode (`both`, `telegram`, `storage`) | `both` |
 | `--api-keys` | `-k` | Comma-separated Gemini API Keys | From `.env` |

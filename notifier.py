@@ -109,6 +109,7 @@ class TelegramNotifier:
     def render_tracker_card(self) -> str:
         """Formats the live visual dashboard tracker card."""
         clean_name = self.task_name[:50]
+        q_label = f" <code>({self.queue_info})</code>" if getattr(self, "queue_info", "") else ""
         mode_label = {
             "both": "Both (Storage + Telegram)",
             "telegram": "Telegram Only (0 MB Phone)",
@@ -117,7 +118,7 @@ class TelegramNotifier:
         return (
             f"⚡ <b>DSA Subber — Live Pipeline Tracker</b>\n"
             f"<b>━━━━━━━━━━━━━━━━━━━━</b>\n"
-            f"🎬 <b>Task:</b> <code>{clean_name}</code>\n"
+            f"🎬 <b>Task:</b> <code>{clean_name}</code>{q_label}\n"
             f"⚙️ <b>Quality Target:</b> {self.quality}\n"
             f"💾 <b>Destination:</b> {mode_label}\n\n"
             f"📥 <b>Download:</b> {self.state['download']}\n"
@@ -165,9 +166,10 @@ class TelegramNotifier:
     # PIPELINE LIFECYCLE HOOKS
     # =========================================================================
 
-    def start_pipeline(self, task_name: str, quality: str = "720p", save_mode: str = "both"):
+    def start_pipeline(self, task_name: str, quality: str = "720p", save_mode: str = "both", queue_info: str = ""):
         """Called when a new anime torrent job begins."""
         self.save_mode = save_mode.strip().lower() if save_mode else "both"
+        self.queue_info = queue_info.strip() if queue_info else ""
         if "dn=" in task_name:
             import urllib.parse
             m = re.search(r'dn=([^&]+)', task_name)
@@ -321,10 +323,11 @@ class TelegramNotifier:
         self.state["current_status"] = "🎉 Pipeline Successfully Completed!"
         self.edit_live_card(force=True)
 
+        q_label = f" ({self.queue_info})" if getattr(self, "queue_info", "") else ""
         # Milestone Ping to Owner
         self.send_message(
             f"🎉 <b>Anime Successfully Published!</b>\n\n"
-            f"🎬 <b>Title:</b> {title}\n"
+            f"🎬 <b>Title:</b> {title}{q_label}\n"
             f"📢 <b>Channel:</b> {channel_title}\n"
             f"⚙️ <b>Quality:</b> {self.quality}\n\n"
             f"🔥 <i>All steps completed: Download ➔ Translation ➔ Encoding ➔ Upload! 🚀</i>"
@@ -336,12 +339,24 @@ class TelegramNotifier:
         self.state["current_status"] = "🎉 Pipeline Successfully Completed!"
         self.edit_live_card(force=True)
 
+        q_label = f" ({self.queue_info})" if getattr(self, "queue_info", "") else ""
         self.send_message(
             f"💾 <b>Anime Successfully Saved to Storage!</b>\n\n"
-            f"🎬 <b>Title:</b> {title}\n"
+            f"🎬 <b>Title:</b> {title}{q_label}\n"
             f"📁 <b>Saved to:</b> <code>{saved_dir}</code>\n"
             f"⚙️ <b>Quality:</b> {self.quality}\n\n"
             f"🔥 <i>Mode: Storage Only (Telegram Upload skipped). Subtitle & Video ready on device! 🚀</i>"
+        )
+
+    def finish_queue_summary(self, total_tasks: int, completed_tasks: int, failed_tasks: int):
+        """Milestone alert sent when an entire multi-task batch queue completes."""
+        status_icon = "🎉" if failed_tasks == 0 else "⚠️"
+        self.send_message(
+            f"{status_icon} <b>Multi-Task Queue Processing Completed!</b>\n\n"
+            f"📊 <b>Total Queue Tasks:</b> {total_tasks}\n"
+            f"✅ <b>Successfully Finished:</b> {completed_tasks}\n"
+            f"❌ <b>Failed / Skipped:</b> {failed_tasks}\n\n"
+            f"🔥 <i>All queued anime torrents have been processed automatically by DSA Subber! 🚀</i>"
         )
 
     def notify_service_start(self, cmd_args: Optional[list] = None):
